@@ -1,0 +1,793 @@
+// crmPlus — Aşama 1 veri modeli
+// Kurallar: docs/01 (roller), docs/02 (alanlar), docs/03 (sonuç kodları), docs/04 (izin), docs/07 (saklama)
+// Finans tabloları ayrı "finance" şemasında tutulur; çağrı/segment servisleri bu şemaya erişmez.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["public", "finance"]
+}
+
+// ───────────────────────── Kullanıcı, rol, oturum ─────────────────────────
+
+enum UserStatus {
+  ACTIVE
+  LOCKED
+  DISABLED
+
+  @@schema("public")
+}
+
+model User {
+  id                 String     @id @default(cuid())
+  email              String     @unique
+  name               String
+  passwordHash       String
+  status             UserStatus @default(ACTIVE)
+  mustChangePassword Boolean    @default(true)
+  mfaSecretEnc       String? // şifreli TOTP sırrı
+  mfaEnabledAt       DateTime?
+  failedLogins       Int        @default(0)
+  lockedUntil        DateTime?
+  lastLoginAt        DateTime?
+  languages          String[]   @default(["tr"]) // temsilcinin konuştuğu diller
+  teamId             String?
+  team               Team?      @relation("TeamMembers", fields: [teamId], references: [id])
+  ledTeams           Team[]     @relation("TeamLeader")
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  disabledAt         DateTime?
+
+  roles         UserRole[]
+  sessions      Session[]
+  recoveryCodes MfaRecoveryCode[]
+  ownedGuests   Guest[]           @relation("GuestOwner")
+  tasks         Task[]            @relation("TaskAssignee")
+  calls         Call[]
+  callbacks     Callback[]        @relation("CallbackAssignee")
+  statusLogs    AgentStatusLog[]
+
+  @@schema("public")
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  leaderId  String?
+  leader    User?    @relation("TeamLeader", fields: [leaderId], references: [id])
+  members   User[]   @relation("TeamMembers")
+  createdAt DateTime @default(now())
+
+  @@schema("public")
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  key         String           @unique // ör. "agent", "team_lead"
+  name        String
+  description String?
+  system      Boolean          @default(false) // seed ile gelen roller silinemez
+  permissions RolePermission[]
+  users       UserRole[]
+
+  @@schema("public")
+}
+
+model RolePermission {
+  roleId     String
+  permission String // src/server/auth/permissions.ts içindeki anahtarlar
+  scope      String @default("own") // own | team | all
+  role       Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permission])
+  @@schema("public")
+}
+
+model UserRole {
+  userId     String
+  roleId     String
+  assignedAt DateTime @default(now())
+  assignedBy String?
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@schema("public")
+}
+
+model Session {
+  id           String    @id // rastgele 32 bayt, yalnız SHA-256 özeti saklanır
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mfaVerified  Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  lastSeenAt   DateTime  @default(now())
+  expiresAt    DateTime
+  ip           String?
+  userAgent    String?
+  revokedAt    DateTime?
+  elevatedUntil DateTime? // gerekçeli acil erişim / dinleme izni
+
+  @@index([userId])
+  @@schema("public")
+}
+
+model MfaRecoveryCode {
+  id       String    @id @default(cuid())
+  userId   String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash String
+  usedAt   DateTime?
+
+  @@schema("public")
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  email     String
+  ip        String?
+  success   Boolean
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@schema("public")
+}
+
+// ───────────────────────── Denetim ve erişim kayıtları ─────────────────────────
+// AuditLog ve AccessLog değiştirilemez: migration ile UPDATE/DELETE tetikleyicisi engellenir.
+
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  at         DateTime @default(now())
+  actorId    String?
+  action     String // ör. "guest.update", "role.assign"
+  entity     String?
+  entityId   String?
+  reason     String?
+  diff       Json?
+  ip         String?
+
+  @@index([entity, entityId])
+  @@index([actorId, at])
+  @@schema("public")
+}
+
+model AccessLog {
+  id       BigInt   @id @default(autoincrement())
+  at       DateTime @default(now())
+  actorId  String?
+  action   String // view | reveal | export | listen | denied
+  resource String
+  resourceId String?
+  reason   String?
+  meta     Json?
+  ip       String?
+
+  @@index([actorId, at])
+  @@index([action, at])
+  @@schema("public")
+}
+
+enum AlertSeverity {
+  P1
+  P2
+  P3
+  P4
+
+  @@schema("public")
+}
+
+model AccessAlert {
+  id         String        @id @default(cuid())
+  at         DateTime      @default(now())
+  rule       String
+  severity   AlertSeverity
+  actorId    String?
+  detail     Json?
+  resolvedAt DateTime?
+  resolvedBy String?
+  resolution String?
+
+  @@schema("public")
+}
+
+// ───────────────────────── Misafir ─────────────────────────
+
+model Guest {
+  id          String    @id @default(cuid())
+  crmNo       Int       @unique @default(autoincrement()) // görünen CRM ID: CRM-000123
+  firstName   String
+  lastName    String
+  language    String    @default("tr")
+  timezone    String    @default("Europe/Istanbul")
+  country     String?
+  city        String?
+  birthYear   Int?
+  vipLevel    String?
+  tags        String[]  @default([])
+  ownerId     String?
+  owner       User?     @relation("GuestOwner", fields: [ownerId], references: [id])
+  fieldSources Json? // alan -> { sourceId, at }
+  anonymizedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  phones       GuestPhone[]
+  emails       GuestEmail[]
+  externalIds  GuestExternalId[]
+  consents     ConsentRecord[]
+  blocks       ContactBlock[]
+  notes        GuestNote[]
+  interactions Interaction[]
+  tasks        Task[]
+  calls        Call[]
+  callbacks    Callback[]
+  history      FieldHistory[]
+
+  @@index([lastName, firstName])
+  @@index([ownerId])
+  @@schema("public")
+}
+
+enum PhoneFormatStatus {
+  VALID
+  INVALID
+  COUNTRY_MISMATCH
+
+  @@schema("public")
+}
+
+enum PhoneReachability {
+  UNVERIFIED
+  REACHED
+  UNREACHED
+  UNREACHABLE
+
+  @@schema("public")
+}
+
+enum PhoneOwnership {
+  CONFIRMED
+  UNCONFIRMED
+  DISPUTED
+
+  @@schema("public")
+}
+
+model GuestPhone {
+  id             String            @id @default(cuid())
+  guestId        String
+  guest          Guest             @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  e164Enc        String // şifreli E.164
+  phoneHash      String // HMAC blind index — unique DEĞİL (aynı numara birden çok kişide olabilir)
+  masked         String // ör. "+90 532 *** ** 18"
+  country        String?
+  lineType       String? // MOBILE | FIXED_LINE | VOIP | UNKNOWN …
+  isPrimary      Boolean           @default(false)
+  formatStatus   PhoneFormatStatus @default(VALID)
+  reachability   PhoneReachability @default(UNVERIFIED)
+  ownership      PhoneOwnership    @default(UNCONFIRMED)
+  lastReachedAt  DateTime?
+  lastFailedAt   DateTime?
+  consecutiveFails Int             @default(0)
+  lastCheckedAt  DateTime?
+  createdAt      DateTime          @default(now())
+  checks         PhoneCheck[]
+
+  @@index([phoneHash])
+  @@index([guestId])
+  @@schema("public")
+}
+
+model PhoneCheck {
+  id      String     @id @default(cuid())
+  phoneId String
+  phone   GuestPhone @relation(fields: [phoneId], references: [id], onDelete: Cascade)
+  kind    String // FORMAT | LINE_TYPE | REACHABILITY
+  result  String
+  source  String // libphonenumber | call | sms_dlr | hlr:<provider>
+  at      DateTime   @default(now())
+  raw     Json?
+
+  @@index([phoneId, at])
+  @@schema("public")
+}
+
+model GuestEmail {
+  id        String  @id @default(cuid())
+  guestId   String
+  guest     Guest   @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  emailEnc  String
+  emailHash String
+  masked    String
+  isPrimary Boolean @default(false)
+
+  @@index([emailHash])
+  @@schema("public")
+}
+
+model GuestExternalId {
+  id       String @id @default(cuid())
+  guestId  String
+  guest    Guest  @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  source   String // casino / iş ortağı kodu
+  value    String
+
+  @@unique([source, value])
+  @@schema("public")
+}
+
+model GuestNote {
+  id        String   @id @default(cuid())
+  guestId   String
+  guest     Guest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  authorId  String?
+  bodyEnc   String
+  createdAt DateTime @default(now())
+
+  @@schema("public")
+}
+
+model Interaction {
+  id        String   @id @default(cuid())
+  guestId   String
+  guest     Guest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  channel   String // CALL | SMS | WHATSAPP | EMAIL | NOTE | IMPORT
+  direction String? // IN | OUT
+  refId     String? // Call.id, Message.id …
+  summary   String?
+  actorId   String?
+  at        DateTime @default(now())
+
+  @@index([guestId, at])
+  @@schema("public")
+}
+
+// ───────────────────────── Kaynak izi ─────────────────────────
+
+model DataSource {
+  id        String   @id @default(cuid())
+  kind      String // IMPORT | MANUAL | IYS | CASINO | API
+  label     String
+  createdAt DateTime @default(now())
+
+  @@schema("public")
+}
+
+model FieldHistory {
+  id            BigInt   @id @default(autoincrement())
+  guestId       String
+  guest         Guest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  field         String
+  oldValue      String?
+  newValue      String?
+  sourceId      String?
+  importBatchId String?
+  actorId       String?
+  at            DateTime @default(now())
+
+  @@index([guestId, at])
+  @@index([importBatchId])
+  @@schema("public")
+}
+
+model MergeRecord {
+  id         String    @id @default(cuid())
+  survivorId String
+  mergedId   String
+  snapshot   Json // birleşen kaydın birleştirme anındaki tam kopyası (ayırma için)
+  actorId    String?
+  reason     String?
+  at         DateTime  @default(now())
+  undoneAt   DateTime?
+
+  @@schema("public")
+}
+
+// ───────────────────────── İçe aktarma, karşılaştırma, inceleme ─────────────────────────
+
+enum ImportPurpose {
+  NEW_LIST
+  UPDATE
+  COMPARE
+
+  @@schema("public")
+}
+
+enum ImportStatus {
+  UPLOADED
+  SCANNED
+  REJECTED
+  MAPPED
+  PREVIEWED
+  APPLYING
+  APPLIED
+  ROLLED_BACK
+  FAILED
+
+  @@schema("public")
+}
+
+model ImportBatch {
+  id           String        @id @default(cuid())
+  purpose      ImportPurpose
+  status       ImportStatus  @default(UPLOADED)
+  sourceLabel  String
+  fileName     String
+  fileSha256   String
+  fileSize     Int
+  storageKey   String? // şifreli geçici depo; süre dolunca null
+  fileExpiresAt DateTime?
+  scanResult   String?
+  sheetName    String?
+  headers      String[]      @default([])
+  mapping      Json?
+  matchKey     String? // CRM_ID | EXTERNAL_ID | PHONE_PLUS
+  defaultCountry String      @default("TR")
+  summary      Json?
+  uploadedById String
+  createdAt    DateTime      @default(now())
+  appliedAt    DateTime?
+  rolledBackAt DateTime?
+  parentId     String? // düzeltme dosyası ise ana batch
+  rows         ImportRow[]
+
+  @@schema("public")
+}
+
+model ImportRow {
+  id        BigInt      @id @default(autoincrement())
+  batchId   String
+  batch     ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  rowNo     Int
+  raw       Json
+  normalized Json?
+  result    String? // NEW | MATCHED | UNCHANGED | CONFLICT | MULTI_MATCH | INVALID | DUP_IN_FILE
+  guestId   String?
+  errors    Json?
+  decisions Json? // alan -> KEEP | USE_NEW | REVIEW
+  applied   Json? // uygulanan değişiklikler (geri alma için)
+
+  @@index([batchId, rowNo])
+  @@index([batchId, result])
+  @@schema("public")
+}
+
+model MappingTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  partner   String?
+  version   Int      @default(1)
+  mapping   Json
+  createdBy String
+  createdAt DateTime @default(now())
+
+  @@unique([name, version])
+  @@schema("public")
+}
+
+model ReviewItem {
+  id         String    @id @default(cuid())
+  kind       String // POSSIBLE_DUPLICATE | FIELD_CONFLICT | CONSENT_CONFLICT | MULTI_MATCH | DISPUTED_PHONE
+  status     String    @default("OPEN") // OPEN | RESOLVED | DISMISSED
+  guestId    String?
+  candidates Json
+  payload    Json?
+  sourceRef  String? // importBatchId / comparisonId / callId
+  decision   String?
+  decidedBy  String?
+  decidedAt  DateTime?
+  reason     String?
+  createdAt  DateTime  @default(now())
+
+  @@index([status, kind])
+  @@schema("public")
+}
+
+model ComparisonJob {
+  id        String   @id @default(cuid())
+  leftRef   String // importBatchId veya "CRM"
+  rightRef  String
+  key       String
+  summary   Json?
+  createdBy String
+  createdAt DateTime @default(now())
+  results   ComparisonResult[]
+
+  @@schema("public")
+}
+
+model ComparisonResult {
+  id       BigInt        @id @default(autoincrement())
+  jobId    String
+  job      ComparisonJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  status   String // NEW | SAME | CONTACT_CHANGED | OTHER_CHANGED | MULTI_MATCH | CONFLICT | MISSING_IN_FILE
+  guestId  String?
+  rowNo    Int?
+  diff     Json?
+
+  @@index([jobId, status])
+  @@schema("public")
+}
+
+// ───────────────────────── İzin ve engelleme ─────────────────────────
+
+enum ConsentChannel {
+  CALL
+  SMS
+  WHATSAPP
+  EMAIL
+  RECORDING
+
+  @@schema("public")
+}
+
+enum ConsentStatus {
+  GRANTED
+  DENIED
+  UNKNOWN
+
+  @@schema("public")
+}
+
+model ConsentRecord {
+  id           String         @id @default(cuid())
+  guestId      String
+  guest        Guest          @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  channel      ConsentChannel
+  status       ConsentStatus  @default(UNKNOWN)
+  scope        String         @default("MARKETING") // MARKETING | SERVICE
+  source       String?
+  sourceSystem String?
+  proofRef     String?
+  grantedAt    DateTime?
+  deniedAt     DateTime?
+  validUntil   DateTime?
+  iysRef       String?
+  updatedBy    String?
+  updatedAt    DateTime       @updatedAt
+
+  @@unique([guestId, channel])
+  @@schema("public")
+}
+
+model ConsentHistory {
+  id        BigInt   @id @default(autoincrement())
+  guestId   String
+  channel   String
+  oldStatus String?
+  newStatus String
+  source    String?
+  actorId   String?
+  at        DateTime @default(now())
+
+  @@index([guestId, at])
+  @@schema("public")
+}
+
+model ContactBlock {
+  id          String    @id @default(cuid())
+  guestId     String
+  guest       Guest     @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  allChannels Boolean   @default(true)
+  channel     String?
+  reason      String // GUEST_REQUEST | LEGAL | DNC_LIST
+  requestedAt DateTime
+  recordedAt  DateTime  @default(now())
+  recordedBy  String?
+  proof       String?
+  removedAt   DateTime?
+  removedBy   String?
+
+  @@index([guestId])
+  @@schema("public")
+}
+
+// ───────────────────────── Çağrı merkezi ─────────────────────────
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+  CANCELLED
+  BLOCKED
+  EXHAUSTED
+
+  @@schema("public")
+}
+
+model Campaign {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  status      String   @default("DRAFT") // DRAFT | ACTIVE | PAUSED | DONE
+  maxAttempts Int      @default(5)
+  createdBy   String
+  createdAt   DateTime @default(now())
+  tasks       Task[]
+
+  @@schema("public")
+}
+
+model Task {
+  id           String     @id @default(cuid())
+  type         String     @default("CALL") // CALL | FOLLOW_UP | DOCUMENT | OTHER
+  reason       String
+  guestId      String
+  guest        Guest      @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  assigneeId   String?
+  assignee     User?      @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  campaignId   String?
+  campaign     Campaign?  @relation(fields: [campaignId], references: [id])
+  status       TaskStatus @default(OPEN)
+  priority     Int        @default(2) // 1 yüksek … 3 düşük
+  assignedAt   DateTime   @default(now())
+  dueAt        DateTime?
+  nextAttemptAt DateTime?
+  attempts     Int        @default(0)
+  lastDisposition String?
+  closeReason  String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  calls        Call[]
+
+  @@index([assigneeId, status])
+  @@index([guestId])
+  @@schema("public")
+}
+
+model Disposition {
+  code            String  @id // REACHED | NO_ANSWER | …
+  labelTr         String
+  labelEn         String
+  category        String // REACHED | UNREACHED
+  countsAsReached Boolean
+  noteRequired    Boolean @default(false)
+  sortOrder       Int
+
+  @@schema("public")
+}
+
+model Call {
+  id            String    @id @default(cuid())
+  guestId       String
+  guest         Guest     @relation(fields: [guestId], references: [id])
+  phoneId       String
+  agentId       String
+  agent         User      @relation(fields: [agentId], references: [id])
+  taskId        String?
+  task          Task?     @relation(fields: [taskId], references: [id])
+  provider      String    @default("manual")
+  externalId    String?
+  startedAt     DateTime  @default(now())
+  answeredAt    DateTime?
+  endedAt       DateTime?
+  closedAt      DateTime?
+  ringSec       Int?
+  talkSec       Int?
+  wrapSec       Int?
+  disposition   String?
+  dispositionSub String?
+  noteEnc       String?
+  noteLength    Int       @default(0) // rapor için yalnız uzunluk (içerik şifreli)
+  autoClosed    Boolean   @default(false)
+  recordingNotice   Boolean?
+  recordingPreference String? // ACCEPTED | DECLINED | NOT_ASKED
+
+  @@index([agentId, startedAt])
+  @@index([guestId, startedAt])
+  @@unique([provider, externalId])
+  @@schema("public")
+}
+
+model Callback {
+  id          String   @id @default(cuid())
+  guestId     String
+  guest       Guest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  assigneeId  String
+  assignee    User     @relation("CallbackAssignee", fields: [assigneeId], references: [id])
+  scheduledAt DateTime
+  status      String   @default("PENDING") // PENDING | DONE | CANCELLED (DUE/LATE/MISSED hesaplanır)
+  sourceCallId String?
+  doneCallId  String?
+  createdAt   DateTime @default(now())
+
+  @@index([assigneeId, scheduledAt])
+  @@schema("public")
+}
+
+model AgentStatusLog {
+  id      BigInt   @id @default(autoincrement())
+  userId  String
+  user    User     @relation(fields: [userId], references: [id])
+  status  String // READY | BREAK | ON_CALL | WRAP_UP | OFFLINE
+  at      DateTime @default(now())
+
+  @@index([userId, at])
+  @@schema("public")
+}
+
+// ───────────────────────── Ayarlar ─────────────────────────
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+
+  @@schema("public")
+}
+
+// ───────────────────────── Finans (ayrı şema) ─────────────────────────
+
+model Casino {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  country   String?
+  currency  String     @default("TRY")
+  contracts Contract[]
+
+  @@schema("finance")
+}
+
+model Contract {
+  id        String            @id @default(cuid())
+  casinoId  String
+  casino    Casino            @relation(fields: [casinoId], references: [id])
+  name      String
+  versions  ContractVersion[]
+  createdAt DateTime          @default(now())
+
+  @@schema("finance")
+}
+
+model ContractVersion {
+  id         String    @id @default(cuid())
+  contractId String
+  contract   Contract  @relation(fields: [contractId], references: [id])
+  version    Int
+  validFrom  DateTime
+  validTo    DateTime?
+  combine    String    @default("SUM") // SUM | MAX | PRIORITY
+  rules      Json // CommissionRule bileşenleri (docs/06 §4)
+  createdBy  String
+  createdAt  DateTime  @default(now())
+
+  @@unique([contractId, version])
+  @@schema("finance")
+}
+
+model CommissionPeriod {
+  id           String                  @id @default(cuid())
+  casinoId     String
+  period       String // "2026-11"
+  status       String                  @default("OPEN") // OPEN | LOCKED
+  lockedAt     DateTime?
+  lockedBy     String?
+  calculations CommissionCalculation[]
+
+  @@unique([casinoId, period])
+  @@schema("finance")
+}
+
+model CommissionCalculation {
+  id           String           @id @default(cuid())
+  periodId     String
+  period       CommissionPeriod @relation(fields: [periodId], references: [id])
+  version      Int              @default(1)
+  status       String           @default("DRAFT") // DRAFT | IN_REVIEW | APPROVED | RECONCILED | CANCELLED
+  amount       Decimal          @db.Decimal(18, 2)
+  currency     String
+  snapshot     Json // kullanılan sözleşme sürümü, oranlar, girdi referansları
+  preparedBy   String
+  approvedBy   String?
+  approvedAt   DateTime?
+  createdAt    DateTime         @default(now())
+
+  @@schema("finance")
+}

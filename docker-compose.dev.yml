@@ -1,0 +1,31 @@
+# Geliştirme ortamı: yalnızca veritabanı ve kuyruk servisleri.
+# Uygulama yerelde `pnpm dev` ile çalışır.
+name: crmplus-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: crmplus
+      POSTGRES_PASSWORD: crmplus_dev
+      POSTGRES_DB: crmplus
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crmplus -d crmplus"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:56380:6379"
+    volumes:
+      - redisdata:/data
+
+volumes:
+  pgdata:
+  redisdata:
