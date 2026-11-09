@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Phone, PhoneOff, PhoneCall, Clock, ShieldCheck, Languages } from "lucide-react";
 import { answerCallAction, closeCallAction, endCallAction, startCallAction } from "@/app/(app)/queue/actions";
+import { callStateAction, recordingPreferenceAction } from "@/app/(app)/calls/actions";
 
 export interface QueueRow {
   taskId: string;
@@ -62,11 +63,17 @@ export function CallWorkspace({
   dispositions,
   openCall,
   locale,
+  pbxMode = false,
+  recordingNotice,
 }: {
   rows: QueueRow[];
   dispositions: { code: string; label: string; noteRequired: boolean }[];
   openCall: OpenCall | null;
   locale: string;
+  /** Santral modunda zaman damgaları webhook ile gelir; ekran bunları okur. */
+  pbxMode?: boolean;
+  /** Karar kapısı açıksa gösterilecek kayıt bildirimi metni; kapalıysa null. */
+  recordingNotice?: string | null;
 }) {
   const t = useTranslations("queue");
   const router = useRouter();
@@ -87,6 +94,7 @@ export function CallWorkspace({
    * düğmelerinin kilitlenmesine yol açıyor. Santral modunda dialUri gelmez, bağlantı gösterilmez.
    */
   const [dialUri, setDialUri] = useState<string | null>(null);
+  const [recPref, setRecPref] = useState<null | "NOTICE_GIVEN" | "DECLINED">(null);
 
   const phase: Phase = !call ? "idle" : call.endedAt ? "wrap" : call.answeredAt ? "connected" : "dialing";
   const row = rows.find((r) => r.taskId === (call?.taskId ?? selected)) ?? rows[0] ?? null;
@@ -96,6 +104,26 @@ export function CallWorkspace({
     const h = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(h);
   }, [phase]);
+
+  // Santral modu: cevaplanma/bitiş zamanlarını webhook'tan oku
+  useEffect(() => {
+    if (!pbxMode || !call || (phase !== "dialing" && phase !== "connected")) return;
+    const h = setInterval(async () => {
+      const r = await callStateAction(call.callId);
+      if (r.ok && (r.data.answeredAt !== call.answeredAt || r.data.endedAt !== call.endedAt)) {
+        setCall({ ...call, answeredAt: r.data.answeredAt ?? call.answeredAt, endedAt: r.data.endedAt ?? call.endedAt });
+      }
+    }, 2000);
+    return () => clearInterval(h);
+  }, [pbxMode, call, phase]);
+
+  const markRecording = (pref: "NOTICE_GIVEN" | "DECLINED") =>
+    call &&
+    startTransition(async () => {
+      const r = await recordingPreferenceAction(call.callId, pref);
+      if (r.ok) setRecPref(pref);
+      else setError(r.error);
+    });
 
   const elapsed = useMemo(() => {
     if (!call) return 0;
@@ -142,6 +170,7 @@ export function CallWorkspace({
       setFlash(null);
       setNow(Date.now());
       setDialUri(d.dialUri);
+      setRecPref(null);
     });
   const onAnswer = () => call && act(() => answerCallAction(call.callId), (d) => setCall({ ...call, answeredAt: d.answeredAt }));
   const onEnd = () => call && act(() => endCallAction(call.callId), (d) => setCall({ ...call, endedAt: d.endedAt }));
@@ -294,7 +323,20 @@ export function CallWorkspace({
                 )}
               </div>
             </div>
-            <p className="mt-3 text-xs text-muted">{t("manualMode")}</p>
+            {(phase === "dialing" || phase === "connected") && recordingNotice && (
+              <div className="mt-4 flex flex-col gap-2 rounded-md border border-line bg-card p-3">
+                <p className="text-xs text-muted">Kayıt bildirimi: “{recordingNotice}”</p>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" disabled={pending || recPref !== null} onClick={() => markRecording("NOTICE_GIVEN")} aria-pressed={recPref === "NOTICE_GIVEN"} className="btn-secondary min-h-9">
+                    {recPref === "NOTICE_GIVEN" ? "Kayıt bildirimi yapıldı ✓" : "Kayıt bildirimi yapıldı"}
+                  </button>
+                  <button type="button" disabled={pending || recPref === "DECLINED"} onClick={() => markRecording("DECLINED")} aria-pressed={recPref === "DECLINED"} className="btn-secondary min-h-9">
+                    {recPref === "DECLINED" ? "Kayıt saklanmayacak ✓" : "Misafir kaydı istemiyor"}
+                  </button>
+                </div>
+              </div>
+            )}
+            <p className="mt-3 text-xs text-muted">{pbxMode ? "Santral modu: süreler santralden gelir. Santral bildirimi gecikirse düğmelerle elle işaretleyebilirsiniz." : t("manualMode")}</p>
 
             {phase === "wrap" && (
               <div className="mt-5 flex flex-col gap-4 border-t border-line pt-5">

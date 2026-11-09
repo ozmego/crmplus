@@ -1,6 +1,6 @@
 // crmPlus — Aşama 1 veri modeli
 // Kurallar: docs/01 (roller), docs/02 (alanlar), docs/03 (sonuç kodları), docs/04 (izin), docs/07 (saklama)
-// Finans tabloları ayrı "finance" şemasında tutulur; çağrı/segment servisleri bu şemaya erişmez.
+// Finans tabloları ayrı "finance", personel/puantaj tabloları ayrı "hr" şemasında tutulur; çağrı/segment servisleri bu şemalara erişmez.
 
 generator client {
   provider = "prisma-client-js"
@@ -9,7 +9,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["public", "finance"]
+  schemas  = ["public", "finance", "hr"]
 }
 
 // ───────────────────────── Kullanıcı, rol, oturum ─────────────────────────
@@ -35,6 +35,7 @@ model User {
   lockedUntil        DateTime?
   lastLoginAt        DateTime?
   languages          String[]   @default(["tr"]) // temsilcinin konuştuğu diller
+  extension          String? // santral dahili numarası
   teamId             String?
   team               Team?      @relation("TeamMembers", fields: [teamId], references: [id])
   ledTeams           Team[]     @relation("TeamLeader")
@@ -100,16 +101,16 @@ model UserRole {
 }
 
 model Session {
-  id           String    @id // rastgele 32 bayt, yalnız SHA-256 özeti saklanır
-  userId       String
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  mfaVerified  Boolean   @default(false)
-  createdAt    DateTime  @default(now())
-  lastSeenAt   DateTime  @default(now())
-  expiresAt    DateTime
-  ip           String?
-  userAgent    String?
-  revokedAt    DateTime?
+  id            String    @id // rastgele 32 bayt, yalnız SHA-256 özeti saklanır
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mfaVerified   Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+  expiresAt     DateTime
+  ip            String?
+  userAgent     String?
+  revokedAt     DateTime?
   elevatedUntil DateTime? // gerekçeli acil erişim / dinleme izni
 
   @@index([userId])
@@ -142,15 +143,15 @@ model LoginAttempt {
 // AuditLog ve AccessLog değiştirilemez: migration ile UPDATE/DELETE tetikleyicisi engellenir.
 
 model AuditLog {
-  id         BigInt   @id @default(autoincrement())
-  at         DateTime @default(now())
-  actorId    String?
-  action     String // ör. "guest.update", "role.assign"
-  entity     String?
-  entityId   String?
-  reason     String?
-  diff       Json?
-  ip         String?
+  id       BigInt   @id @default(autoincrement())
+  at       DateTime @default(now())
+  actorId  String?
+  action   String // ör. "guest.update", "role.assign"
+  entity   String?
+  entityId String?
+  reason   String?
+  diff     Json?
+  ip       String?
 
   @@index([entity, entityId])
   @@index([actorId, at])
@@ -158,15 +159,15 @@ model AuditLog {
 }
 
 model AccessLog {
-  id       BigInt   @id @default(autoincrement())
-  at       DateTime @default(now())
-  actorId  String?
-  action   String // view | reveal | export | listen | denied
-  resource String
+  id         BigInt   @id @default(autoincrement())
+  at         DateTime @default(now())
+  actorId    String?
+  action     String // view | reveal | export | listen | denied
+  resource   String
   resourceId String?
-  reason   String?
-  meta     Json?
-  ip       String?
+  reason     String?
+  meta       Json?
+  ip         String?
 
   @@index([actorId, at])
   @@index([action, at])
@@ -199,23 +200,23 @@ model AccessAlert {
 // ───────────────────────── Misafir ─────────────────────────
 
 model Guest {
-  id          String    @id @default(cuid())
-  crmNo       Int       @unique @default(autoincrement()) // görünen CRM ID: CRM-000123
-  firstName   String
-  lastName    String
-  language    String    @default("tr")
-  timezone    String    @default("Europe/Istanbul")
-  country     String?
-  city        String?
-  birthYear   Int?
-  vipLevel    String?
-  tags        String[]  @default([])
-  ownerId     String?
-  owner       User?     @relation("GuestOwner", fields: [ownerId], references: [id])
+  id           String    @id @default(cuid())
+  crmNo        Int       @unique @default(autoincrement()) // görünen CRM ID: CRM-000123
+  firstName    String
+  lastName     String
+  language     String    @default("tr")
+  timezone     String    @default("Europe/Istanbul")
+  country      String?
+  city         String?
+  birthYear    Int?
+  vipLevel     String?
+  tags         String[]  @default([])
+  ownerId      String?
+  owner        User?     @relation("GuestOwner", fields: [ownerId], references: [id])
   fieldSources Json? // alan -> { sourceId, at }
   anonymizedAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   phones       GuestPhone[]
   emails       GuestEmail[]
@@ -260,24 +261,24 @@ enum PhoneOwnership {
 }
 
 model GuestPhone {
-  id             String            @id @default(cuid())
-  guestId        String
-  guest          Guest             @relation(fields: [guestId], references: [id], onDelete: Cascade)
-  e164Enc        String // şifreli E.164
-  phoneHash      String // HMAC blind index — unique DEĞİL (aynı numara birden çok kişide olabilir)
-  masked         String // ör. "+90 532 *** ** 18"
-  country        String?
-  lineType       String? // MOBILE | FIXED_LINE | VOIP | UNKNOWN …
-  isPrimary      Boolean           @default(false)
-  formatStatus   PhoneFormatStatus @default(VALID)
-  reachability   PhoneReachability @default(UNVERIFIED)
-  ownership      PhoneOwnership    @default(UNCONFIRMED)
-  lastReachedAt  DateTime?
-  lastFailedAt   DateTime?
-  consecutiveFails Int             @default(0)
-  lastCheckedAt  DateTime?
-  createdAt      DateTime          @default(now())
-  checks         PhoneCheck[]
+  id               String            @id @default(cuid())
+  guestId          String
+  guest            Guest             @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  e164Enc          String // şifreli E.164
+  phoneHash        String // HMAC blind index — unique DEĞİL (aynı numara birden çok kişide olabilir)
+  masked           String // ör. "+90 532 *** ** 18"
+  country          String?
+  lineType         String? // MOBILE | FIXED_LINE | VOIP | UNKNOWN …
+  isPrimary        Boolean           @default(false)
+  formatStatus     PhoneFormatStatus @default(VALID)
+  reachability     PhoneReachability @default(UNVERIFIED)
+  ownership        PhoneOwnership    @default(UNCONFIRMED)
+  lastReachedAt    DateTime?
+  lastFailedAt     DateTime?
+  consecutiveFails Int               @default(0)
+  lastCheckedAt    DateTime?
+  createdAt        DateTime          @default(now())
+  checks           PhoneCheck[]
 
   @@index([phoneHash])
   @@index([guestId])
@@ -312,11 +313,11 @@ model GuestEmail {
 }
 
 model GuestExternalId {
-  id       String @id @default(cuid())
-  guestId  String
-  guest    Guest  @relation(fields: [guestId], references: [id], onDelete: Cascade)
-  source   String // casino / iş ortağı kodu
-  value    String
+  id      String @id @default(cuid())
+  guestId String
+  guest   Guest  @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  source  String // casino / iş ortağı kodu
+  value   String
 
   @@unique([source, value])
   @@schema("public")
@@ -337,7 +338,7 @@ model Interaction {
   id        String   @id @default(cuid())
   guestId   String
   guest     Guest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
-  channel   String // CALL | SMS | WHATSAPP | EMAIL | NOTE | IMPORT
+  channel   String // CALL | SMS | WHATSAPP | EMAIL | NOTE | IMPORT | VISIT (saha ziyareti)
   direction String? // IN | OUT
   refId     String? // Call.id, Message.id …
   summary   String?
@@ -414,44 +415,44 @@ enum ImportStatus {
 }
 
 model ImportBatch {
-  id           String        @id @default(cuid())
-  purpose      ImportPurpose
-  status       ImportStatus  @default(UPLOADED)
-  sourceLabel  String
-  fileName     String
-  fileSha256   String
-  fileSize     Int
-  storageKey   String? // şifreli geçici depo; süre dolunca null
-  fileExpiresAt DateTime?
-  scanResult   String?
-  sheetName    String?
-  headers      String[]      @default([])
-  mapping      Json?
-  matchKey     String? // CRM_ID | EXTERNAL_ID | PHONE_PLUS
-  defaultCountry String      @default("TR")
-  summary      Json?
-  uploadedById String
-  createdAt    DateTime      @default(now())
-  appliedAt    DateTime?
-  rolledBackAt DateTime?
-  parentId     String? // düzeltme dosyası ise ana batch
-  rows         ImportRow[]
+  id             String        @id @default(cuid())
+  purpose        ImportPurpose
+  status         ImportStatus  @default(UPLOADED)
+  sourceLabel    String
+  fileName       String
+  fileSha256     String
+  fileSize       Int
+  storageKey     String? // şifreli geçici depo; süre dolunca null
+  fileExpiresAt  DateTime?
+  scanResult     String?
+  sheetName      String?
+  headers        String[]      @default([])
+  mapping        Json?
+  matchKey       String? // CRM_ID | EXTERNAL_ID | PHONE_PLUS
+  defaultCountry String        @default("TR")
+  summary        Json?
+  uploadedById   String
+  createdAt      DateTime      @default(now())
+  appliedAt      DateTime?
+  rolledBackAt   DateTime?
+  parentId       String? // düzeltme dosyası ise ana batch
+  rows           ImportRow[]
 
   @@schema("public")
 }
 
 model ImportRow {
-  id        BigInt      @id @default(autoincrement())
-  batchId   String
-  batch     ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  rowNo     Int
-  raw       Json
+  id         BigInt      @id @default(autoincrement())
+  batchId    String
+  batch      ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  rowNo      Int
+  raw        Json
   normalized Json?
-  result    String? // NEW | MATCHED | UNCHANGED | CONFLICT | MULTI_MATCH | INVALID | DUP_IN_FILE
-  guestId   String?
-  errors    Json?
-  decisions Json? // alan -> KEEP | USE_NEW | REVIEW
-  applied   Json? // uygulanan değişiklikler (geri alma için)
+  result     String? // NEW | MATCHED | UNCHANGED | CONFLICT | MULTI_MATCH | INVALID | DUP_IN_FILE
+  guestId    String?
+  errors     Json?
+  decisions  Json? // alan -> KEEP | USE_NEW | REVIEW
+  applied    Json? // uygulanan değişiklikler (geri alma için)
 
   @@index([batchId, rowNo])
   @@index([batchId, result])
@@ -490,26 +491,26 @@ model ReviewItem {
 }
 
 model ComparisonJob {
-  id        String   @id @default(cuid())
+  id        String             @id @default(cuid())
   leftRef   String // importBatchId veya "CRM"
   rightRef  String
   key       String
   summary   Json?
   createdBy String
-  createdAt DateTime @default(now())
+  createdAt DateTime           @default(now())
   results   ComparisonResult[]
 
   @@schema("public")
 }
 
 model ComparisonResult {
-  id       BigInt        @id @default(autoincrement())
-  jobId    String
-  job      ComparisonJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  status   String // NEW | SAME | CONTACT_CHANGED | OTHER_CHANGED | MULTI_MATCH | CONFLICT | MISSING_IN_FILE
-  guestId  String?
-  rowNo    Int?
-  diff     Json?
+  id      BigInt        @id @default(autoincrement())
+  jobId   String
+  job     ComparisonJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  status  String // NEW | SAME | CONTACT_CHANGED | OTHER_CHANGED | MULTI_MATCH | CONFLICT | MISSING_IN_FILE
+  guestId String?
+  rowNo   Int?
+  diff    Json?
 
   @@index([jobId, status])
   @@schema("public")
@@ -615,26 +616,26 @@ model Campaign {
 }
 
 model Task {
-  id           String     @id @default(cuid())
-  type         String     @default("CALL") // CALL | FOLLOW_UP | DOCUMENT | OTHER
-  reason       String
-  guestId      String
-  guest        Guest      @relation(fields: [guestId], references: [id], onDelete: Cascade)
-  assigneeId   String?
-  assignee     User?      @relation("TaskAssignee", fields: [assigneeId], references: [id])
-  campaignId   String?
-  campaign     Campaign?  @relation(fields: [campaignId], references: [id])
-  status       TaskStatus @default(OPEN)
-  priority     Int        @default(2) // 1 yüksek … 3 düşük
-  assignedAt   DateTime   @default(now())
-  dueAt        DateTime?
-  nextAttemptAt DateTime?
-  attempts     Int        @default(0)
+  id              String     @id @default(cuid())
+  type            String     @default("CALL") // CALL | FOLLOW_UP | DOCUMENT | OTHER
+  reason          String
+  guestId         String
+  guest           Guest      @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  assigneeId      String?
+  assignee        User?      @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  campaignId      String?
+  campaign        Campaign?  @relation(fields: [campaignId], references: [id])
+  status          TaskStatus @default(OPEN)
+  priority        Int        @default(2) // 1 yüksek … 3 düşük
+  assignedAt      DateTime   @default(now())
+  dueAt           DateTime?
+  nextAttemptAt   DateTime?
+  attempts        Int        @default(0)
   lastDisposition String?
-  closeReason  String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  calls        Call[]
+  closeReason     String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  calls           Call[]
 
   @@index([assigneeId, status])
   @@index([guestId])
@@ -654,61 +655,295 @@ model Disposition {
 }
 
 model Call {
-  id            String    @id @default(cuid())
-  guestId       String
-  guest         Guest     @relation(fields: [guestId], references: [id])
-  phoneId       String
-  agentId       String
-  agent         User      @relation(fields: [agentId], references: [id])
-  taskId        String?
-  task          Task?     @relation(fields: [taskId], references: [id])
-  provider      String    @default("manual")
-  externalId    String?
-  startedAt     DateTime  @default(now())
-  answeredAt    DateTime?
-  endedAt       DateTime?
-  closedAt      DateTime?
-  ringSec       Int?
-  talkSec       Int?
-  wrapSec       Int?
-  disposition   String?
-  dispositionSub String?
-  noteEnc       String?
-  noteLength    Int       @default(0) // rapor için yalnız uzunluk (içerik şifreli)
-  autoClosed    Boolean   @default(false)
-  recordingNotice   Boolean?
+  id                  String    @id @default(cuid())
+  guestId             String
+  guest               Guest     @relation(fields: [guestId], references: [id])
+  phoneId             String
+  agentId             String
+  agent               User      @relation(fields: [agentId], references: [id])
+  taskId              String?
+  task                Task?     @relation(fields: [taskId], references: [id])
+  provider            String    @default("manual")
+  externalId          String?
+  startedAt           DateTime  @default(now())
+  answeredAt          DateTime?
+  endedAt             DateTime?
+  closedAt            DateTime?
+  ringSec             Int?
+  talkSec             Int?
+  wrapSec             Int?
+  disposition         String?
+  dispositionSub      String?
+  noteEnc             String?
+  noteLength          Int       @default(0) // rapor için yalnız uzunluk (içerik şifreli)
+  autoClosed          Boolean   @default(false)
+  recordingNotice     Boolean?
   recordingPreference String? // ACCEPTED | DECLINED | NOT_ASKED
 
+  @@unique([provider, externalId])
   @@index([agentId, startedAt])
   @@index([guestId, startedAt])
-  @@unique([provider, externalId])
   @@schema("public")
 }
 
 model Callback {
-  id          String   @id @default(cuid())
-  guestId     String
-  guest       Guest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
-  assigneeId  String
-  assignee    User     @relation("CallbackAssignee", fields: [assigneeId], references: [id])
-  scheduledAt DateTime
-  status      String   @default("PENDING") // PENDING | DONE | CANCELLED (DUE/LATE/MISSED hesaplanır)
+  id           String    @id @default(cuid())
+  guestId      String
+  guest        Guest     @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  assigneeId   String
+  assignee     User      @relation("CallbackAssignee", fields: [assigneeId], references: [id])
+  scheduledAt  DateTime
+  status       String    @default("PENDING") // PENDING | DONE | CANCELLED (DUE/LATE/MISSED hesaplanır)
   sourceCallId String?
-  doneCallId  String?
-  createdAt   DateTime @default(now())
+  doneCallId   String?
+  escalatedAt  DateTime? // gecikince takım liderine görev açıldı
+  createdAt    DateTime  @default(now())
 
   @@index([assigneeId, scheduledAt])
   @@schema("public")
 }
 
 model AgentStatusLog {
-  id      BigInt   @id @default(autoincrement())
-  userId  String
-  user    User     @relation(fields: [userId], references: [id])
-  status  String // READY | BREAK | ON_CALL | WRAP_UP | OFFLINE
-  at      DateTime @default(now())
+  id     BigInt   @id @default(autoincrement())
+  userId String
+  user   User     @relation(fields: [userId], references: [id])
+  status String // READY | BREAK | ON_CALL | WRAP_UP | OFFLINE
+  at     DateTime @default(now())
 
   @@index([userId, at])
+  @@schema("public")
+}
+
+// ───────────────────────── Santral ─────────────────────────
+
+/**
+ * Santral webhook olayları — idempotent işleme için (provider + eventId tekil).
+ */
+model TelephonyEvent {
+  id         String   @id @default(cuid())
+  provider   String
+  eventId    String
+  type       String // answered | ended | recording.ready
+  callId     String?
+  payload    Json
+  receivedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+  @@schema("public")
+}
+
+/**
+ * Santral kesintisi / geçersiz webhook / arama başlatma hatası (plan v4 §3).
+ */
+model TelephonyIncident {
+  id         String    @id @default(cuid())
+  provider   String
+  kind       String // DIAL_FAILED | WEBHOOK_INVALID | WEBHOOK_UNKNOWN_CALL | RECORDING_FETCH_FAILED
+  detail     String
+  callId     String?
+  at         DateTime  @default(now())
+  resolvedAt DateTime?
+
+  @@index([at])
+  @@schema("public")
+}
+
+// ───────────────────────── Ses kaydı ve Türkçe analiz ─────────────────────────
+// Karar kapısı (Setting "recording.gate") onaylanmadan kayıt saklanmaz. Analiz yalnız öneridir;
+// duygu, kişilik, ikna edilebilirlik, kumar davranışı veya risk/değer skoru alanı YOKTUR.
+
+model Recording {
+  id             String      @id @default(cuid())
+  callId         String      @unique
+  provider       String
+  sourceUrlEnc   String? // santral indirme adresi (belirteç içerebilir) — şifreli; indirildikten sonra silinir
+  status         String      @default("PENDING_FETCH") // PENDING_FETCH | STORED | FAILED | DISCARDED | DELETED
+  discardReason  String? // GATE_CLOSED | GUEST_DECLINED
+  storageKey     String?
+  channels       Int         @default(1)
+  durationSec    Int?
+  sizeBytes      Int?
+  sha256         String?
+  mimeType       String?
+  retentionUntil DateTime?
+  attempts       Int         @default(0)
+  error          String?
+  createdAt      DateTime    @default(now())
+  storedAt       DateTime?
+  deletedAt      DateTime?
+  transcript     Transcript?
+
+  @@index([status])
+  @@schema("public")
+}
+
+model Transcript {
+  id            String           @id @default(cuid())
+  recordingId   String           @unique
+  recording     Recording        @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  callId        String           @unique
+  status        String           @default("QUEUED") // QUEUED | PROCESSING | DONE | LOW_CONFIDENCE | FAILED
+  language      String?
+  model         String?
+  modelVersion  String?
+  confidence    Float?
+  rawEnc        String? // maskelenmemiş konuşma bölütleri (şifreli JSON) — kısa saklama
+  rawExpiresAt  DateTime?
+  segments      Json? // maskelenmiş bölütler [{speaker, start, end, text}]
+  redactedKinds String[]         @default([])
+  error         String?
+  createdAt     DateTime         @default(now())
+  completedAt   DateTime?
+  edits         TranscriptEdit[]
+  analysis      CallAnalysis?
+
+  @@index([status])
+  @@schema("public")
+}
+
+model TranscriptEdit {
+  id           String     @id @default(cuid())
+  transcriptId String
+  transcript   Transcript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+  segmentIndex Int
+  before       String
+  after        String
+  editorId     String
+  at           DateTime   @default(now())
+
+  @@schema("public")
+}
+
+/**
+ * Yalnız öneri: özet, konu etiketleri, aksiyon önerileri, süreç uyarıları.
+ */
+model CallAnalysis {
+  id                  String           @id @default(cuid())
+  transcriptId        String           @unique
+  transcript          Transcript       @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+  callId              String           @unique
+  summary             String
+  topics              String[]
+  actions             Json // [{type: CALLBACK|TRANSFER|FOLLOW_UP, at?: ISO, note}]
+  processFlags        Json // [{code, message, evidence?}]
+  dispositionMismatch Boolean          @default(false)
+  model               String
+  modelVersion        String
+  confidence          Float?
+  reviewStatus        String           @default("PENDING") // PENDING | APPROVED | CORRECTED | DISPUTED
+  createdAt           DateTime         @default(now())
+  reviews             AnalysisReview[]
+
+  @@index([reviewStatus])
+  @@schema("public")
+}
+
+model AnalysisReview {
+  id         String       @id @default(cuid())
+  analysisId String
+  analysis   CallAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  reviewerId String
+  decision   String // APPROVE | CORRECT | DISPUTE
+  changes    Json?
+  comment    String?
+  at         DateTime     @default(now())
+
+  @@schema("public")
+}
+
+/**
+ * Kayıt dinleme izni: gerekçeli ve süreli (varsayılan 24 saat).
+ */
+model RecordingAccessGrant {
+  id        String   @id @default(cuid())
+  userId    String
+  callId    String
+  reason    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId, callId])
+  @@schema("public")
+}
+
+// ───────────────────────── Mesajlaşma (SMS — Aşama 1; WhatsApp Aşama 2) ─────────────────────────
+
+model MessageTemplate {
+  id         String    @id @default(cuid())
+  name       String
+  channel    String    @default("SMS")
+  category   String // MARKETING | INFORMATIONAL
+  language   String    @default("tr")
+  body       String
+  status     String    @default("DRAFT") // DRAFT | APPROVED | ARCHIVED
+  warnings   String[]  @default([])
+  createdBy  String
+  approvedBy String?
+  approvedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@schema("public")
+}
+
+model MessageCampaign {
+  id             String    @id @default(cuid())
+  name           String
+  channel        String    @default("SMS")
+  category       String // MARKETING | INFORMATIONAL
+  templateId     String
+  segment        Json // izinli alanlarla filtre: dil, ülke, etiket, son iletişim
+  status         String    @default("DRAFT") // DRAFT | PENDING_APPROVAL | APPROVED | SENDING | DONE | CANCELLED
+  estimate       Json? // hedef, uygun, hariç tutma nedenleri, parça, maliyet
+  stats          Json? // gönderildi, başarısız, atlandı
+  legalConfirmed Boolean   @default(false)
+  preparedBy     String
+  submittedAt    DateTime?
+  approvedBy     String?
+  approvedAt     DateTime?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  cancelReason   String?
+  createdAt      DateTime  @default(now())
+
+  @@schema("public")
+}
+
+model Message {
+  id                String    @id @default(cuid())
+  campaignId        String?
+  guestId           String?
+  phoneId           String?
+  phoneHash         String?
+  channel           String    @default("SMS")
+  direction         String // OUT | IN
+  templateId        String?
+  bodyEnc           String
+  segments          Int       @default(1)
+  provider          String
+  providerMessageId String?
+  status            String // QUEUED | SENT | DELIVERED | FAILED | SKIPPED | RECEIVED
+  error             String?
+  sentById          String?
+  isTest            Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+
+  @@unique([provider, providerMessageId])
+  @@index([campaignId, status])
+  @@index([guestId, createdAt])
+  @@schema("public")
+}
+
+model OptOutEvent {
+  id          String   @id @default(cuid())
+  channel     String
+  phoneHash   String
+  keyword     String
+  guestIds    String[] @default([])
+  receivedAt  DateTime
+  processedAt DateTime @default(now())
+
   @@schema("public")
 }
 
@@ -724,13 +959,18 @@ model Setting {
 }
 
 // ───────────────────────── Finans (ayrı şema) ─────────────────────────
+// Misafire yalnız düz kimlik (guestId + CRM no + ad anlık görüntüsü) ile bağlanır; public şemadan
+// finans tablolarına ilişki tanımlanmaz, böylece CRM sorguları finans verisine yanlışlıkla ulaşamaz.
 
 model Casino {
-  id        String     @id @default(cuid())
-  name      String     @unique
+  id        String             @id @default(cuid())
+  name      String             @unique
   country   String?
-  currency  String     @default("TRY")
+  currency  String             @default("TRY")
   contracts Contract[]
+  trips     Trip[]
+  periods   CommissionPeriod[]
+  createdAt DateTime           @default(now())
 
   @@schema("finance")
 }
@@ -755,6 +995,7 @@ model ContractVersion {
   validTo    DateTime?
   combine    String    @default("SUM") // SUM | MAX | PRIORITY
   rules      Json // CommissionRule bileşenleri (docs/06 §4)
+  note       String?
   createdBy  String
   createdAt  DateTime  @default(now())
 
@@ -762,32 +1003,349 @@ model ContractVersion {
   @@schema("finance")
 }
 
+model Trip {
+  id        String      @id @default(cuid())
+  casinoId  String
+  casino    Casino      @relation(fields: [casinoId], references: [id])
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  status    String      @default("PLANNED") // PLANNED | DONE | CANCELLED
+  createdBy String
+  createdAt DateTime    @default(now())
+  guests    TripGuest[]
+
+  @@schema("finance")
+}
+
+model TripGuest {
+  id        String         @id @default(cuid())
+  tripId    String
+  trip      Trip           @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  guestId   String // public.Guest.id (ilişki tanımlanmaz)
+  crmNo     Int
+  guestName String // eklendiği anki ad (anlık görüntü)
+  results   GamingResult[]
+
+  @@unique([tripId, guestId])
+  @@schema("finance")
+}
+
+model GamingResult {
+  id          String           @id @default(cuid())
+  tripGuestId String
+  tripGuest   TripGuest        @relation(fields: [tripGuestId], references: [id])
+  periodId    String
+  period      CommissionPeriod @relation(fields: [periodId], references: [id])
+  playedOn    DateTime
+  buyIn       Decimal?         @db.Decimal(18, 2)
+  cashOut     Decimal?         @db.Decimal(18, 2)
+  rolling     Decimal?         @db.Decimal(18, 2)
+  netLoss     Decimal          @db.Decimal(18, 2) // pozitif = misafir kaybı, negatif = misafir kazancı
+  currency    String
+  source      String           @default("MANUAL") // MANUAL | IMPORT | STATEMENT
+  sourceRef   String?
+  enteredBy   String
+  enteredAt   DateTime         @default(now())
+
+  @@index([periodId])
+  @@schema("finance")
+}
+
 model CommissionPeriod {
   id           String                  @id @default(cuid())
   casinoId     String
+  casino       Casino                  @relation(fields: [casinoId], references: [id])
   period       String // "2026-11"
   status       String                  @default("OPEN") // OPEN | LOCKED
   lockedAt     DateTime?
   lockedBy     String?
   calculations CommissionCalculation[]
+  results      GamingResult[]
+  adjustments  CommissionAdjustment[]
 
   @@unique([casinoId, period])
   @@schema("finance")
 }
 
 model CommissionCalculation {
-  id           String           @id @default(cuid())
+  id           String                 @id @default(cuid())
   periodId     String
-  period       CommissionPeriod @relation(fields: [periodId], references: [id])
-  version      Int              @default(1)
-  status       String           @default("DRAFT") // DRAFT | IN_REVIEW | APPROVED | RECONCILED | CANCELLED
-  amount       Decimal          @db.Decimal(18, 2)
+  period       CommissionPeriod       @relation(fields: [periodId], references: [id])
+  version      Int                    @default(1)
+  status       String                 @default("DRAFT") // DRAFT | IN_REVIEW | APPROVED | RECONCILED | CANCELLED
+  amount       Decimal                @db.Decimal(18, 2)
   currency     String
-  snapshot     Json // kullanılan sözleşme sürümü, oranlar, girdi referansları
+  snapshot     Json // kullanılan sözleşme sürümü ve kurallar, girdi sonuçları ve toplamlar, hesap notu
+  note         String?
   preparedBy   String
+  submittedAt  DateTime?
   approvedBy   String?
   approvedAt   DateTime?
-  createdAt    DateTime         @default(now())
+  rejectReason String?
+  statementRef String?
+  reconciledBy String?
+  reconciledAt DateTime?
+  cancelReason String?
+  createdAt    DateTime               @default(now())
+  adjustments  CommissionAdjustment[]
 
   @@schema("finance")
+}
+
+/**
+ * Kilitli döneme ait düzeltme: açık bir sonraki dönemde yeni kayıt olarak işlenir (docs/06 §6).
+ */
+model CommissionAdjustment {
+  id            String                @id @default(cuid())
+  calculationId String
+  calculation   CommissionCalculation @relation(fields: [calculationId], references: [id])
+  periodId      String // düzeltmenin işlendiği (açık) dönem
+  period        CommissionPeriod      @relation(fields: [periodId], references: [id])
+  amount        Decimal               @db.Decimal(18, 2) // + veya −
+  currency      String
+  reason        String
+  status        String                @default("DRAFT") // DRAFT | APPROVED | CANCELLED
+  preparedBy    String
+  approvedBy    String?
+  approvedAt    DateTime?
+  createdAt     DateTime              @default(now())
+
+  @@schema("finance")
+}
+
+// ───────────────────────── Personel ve puantaj (ayrı şema, Aşama 1B) ─────────────────────────
+// public şemasına ilişki tanımlanmaz (userId / teamId düz alan); CRM sorguları personel verisine ulaşamaz.
+// Sağlık/teşhis bilgisi tutulmaz (docs/11 §4). Saatler Europe/Istanbul (+03:00) takvim gününe göredir.
+
+model Employee {
+  id             String     @id @default(cuid())
+  sicilNo        String     @unique
+  firstName      String
+  lastName       String
+  department     String // CALL_CENTER | FIELD | OFFICE | FINANCE | MANAGEMENT
+  title          String?
+  teamId         String? // public.Team.id (düz alan)
+  managerId      String?
+  manager        Employee?  @relation("EmployeeManager", fields: [managerId], references: [id])
+  reports        Employee[] @relation("EmployeeManager")
+  employmentType String     @default("FULL") // FULL | PART
+  weeklyHours    Int        @default(45)
+  hireDate       DateTime   @db.Date
+  exitDate       DateTime?  @db.Date
+  status         String     @default("ACTIVE") // ACTIVE | EXITED
+  userId         String?    @unique // CRM kullanıcısıysa public.User.id
+  phoneEnc       String?
+  emailEnc       String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  assignments RosterAssignment[]
+  routes      FieldRoute[]
+  leaves      LeaveRequest[]
+  days        AttendanceDay[]
+
+  @@index([teamId])
+  @@schema("hr")
+}
+
+model ShiftTemplate {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  startMin Int // gece yarısından dakika
+  endMin   Int // startMin'den küçükse ertesi güne devreder
+  breakMin Int     @default(60)
+  color    String  @default("#1FA29A")
+  active   Boolean @default(true)
+
+  @@schema("hr")
+}
+
+model Roster {
+  id              String             @id @default(cuid())
+  weekStart       DateTime           @db.Date // Pazartesi
+  scope           String // ekip kimliği veya "GENEL"
+  status          String             @default("DRAFT") // DRAFT | PUBLISHED | CHANGED
+  version         Int                @default(0)
+  publishedAt     DateTime?
+  publishedBy     String?
+  prevPublishedAt DateTime?
+  overrideReason  String?
+  createdBy       String
+  createdAt       DateTime           @default(now())
+  assignments     RosterAssignment[]
+
+  @@unique([weekStart, scope])
+  @@schema("hr")
+}
+
+model RosterAssignment {
+  id         String   @id @default(cuid())
+  rosterId   String
+  roster     Roster   @relation(fields: [rosterId], references: [id], onDelete: Cascade)
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  date       DateTime @db.Date
+  kind       String // WORK | OFF | LEAVE | TRAINING | FIELD
+  templateId String?
+  startMin   Int?
+  endMin     Int?
+  breakMin   Int?
+  note       String?
+  updatedAt  DateTime @updatedAt
+
+  @@unique([employeeId, date])
+  @@index([rosterId])
+  @@schema("hr")
+}
+
+model Location {
+  id      String      @id @default(cuid())
+  name    String      @unique
+  kind    String // CASINO | HOTEL | AIRPORT | OFFICE | OTHER
+  city    String?
+  address String?
+  active  Boolean     @default(true)
+  stops   RouteStop[]
+
+  @@schema("hr")
+}
+
+model FieldRoute {
+  id          String      @id @default(cuid())
+  employeeId  String
+  employee    Employee    @relation(fields: [employeeId], references: [id])
+  weekStart   DateTime    @db.Date
+  status      String      @default("DRAFT") // DRAFT | PUBLISHED
+  createdBy   String
+  publishedAt DateTime?
+  stops       RouteStop[]
+
+  @@unique([employeeId, weekStart])
+  @@schema("hr")
+}
+
+model RouteStop {
+  id         String     @id @default(cuid())
+  routeId    String
+  route      FieldRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  date       DateTime   @db.Date
+  seq        Int
+  plannedMin Int?
+  locationId String
+  location   Location   @relation(fields: [locationId], references: [id])
+  purpose    String
+  guestId    String? // public.Guest.id (düz alan; finans yok)
+  guestName  String? // rotada yalnız ad görünür
+  status     String     @default("PLANNED") // PLANNED | DONE | SKIPPED | CANCELLED
+  checkInAt  DateTime?
+  checkOutAt DateTime?
+  resultNote String?
+
+  @@index([routeId, date])
+  @@schema("hr")
+}
+
+model LeaveType {
+  id            String         @id @default(cuid())
+  code          String         @unique // İ | R | Ü | M | İD
+  name          String
+  paid          Boolean        @default(true)
+  needsDocument Boolean        @default(false)
+  requests      LeaveRequest[]
+
+  @@schema("hr")
+}
+
+model LeaveRequest {
+  id            String    @id @default(cuid())
+  employeeId    String
+  employee      Employee  @relation(fields: [employeeId], references: [id])
+  typeId        String
+  type          LeaveType @relation(fields: [typeId], references: [id])
+  startDate     DateTime  @db.Date
+  endDate       DateTime  @db.Date
+  halfDay       Boolean   @default(false)
+  status        String    @default("REQUESTED") // REQUESTED | PRE_APPROVED | APPROVED | REJECTED | CANCELLED
+  note          String?
+  documentRef   String? // belge referansı (teşhis/sağlık bilgisi yazılmaz)
+  requestedBy   String
+  preApprovedBy String?
+  approvedBy    String?
+  decidedAt     DateTime?
+  rejectReason  String?
+  createdAt     DateTime  @default(now())
+
+  @@index([employeeId, startDate])
+  @@schema("hr")
+}
+
+model PublicHoliday {
+  id      String   @id @default(cuid())
+  date    DateTime @unique @db.Date
+  name    String
+  halfDay Boolean  @default(false) // arife: 13:00'ten sonrası tatil
+
+  @@schema("hr")
+}
+
+model AttendanceDay {
+  id             String                 @id @default(cuid())
+  employeeId     String
+  employee       Employee               @relation(fields: [employeeId], references: [id])
+  date           DateTime               @db.Date
+  planStart      DateTime?
+  planEnd        DateTime?
+  firstIn        DateTime?
+  lastOut        DateTime?
+  workedMin      Int                    @default(0)
+  breakMin       Int                    @default(0)
+  lateMin        Int                    @default(0)
+  earlyMin       Int                    @default(0)
+  overtimeMin    Int                    @default(0)
+  holidayWorkMin Int                    @default(0)
+  code           String                 @default("")
+  source         String                 @default("SYSTEM") // SYSTEM | FIELD | MANUAL
+  flags          String[]               @default([])
+  adjusted       Boolean                @default(false)
+  computedAt     DateTime               @default(now())
+  adjustments    AttendanceAdjustment[]
+
+  @@unique([employeeId, date])
+  @@index([date])
+  @@schema("hr")
+}
+
+/**
+ * Puantaj düzeltmeleri değiştirilemez (DB tetikleyicisi).
+ */
+model AttendanceAdjustment {
+  id       String        @id @default(cuid())
+  dayId    String
+  day      AttendanceDay @relation(fields: [dayId], references: [id])
+  field    String // firstIn | lastOut | breakMin | code
+  oldValue String?
+  newValue String
+  reason   String
+  actorId  String
+  at       DateTime      @default(now())
+
+  @@index([dayId])
+  @@schema("hr")
+}
+
+model TimesheetPeriod {
+  id         String    @id @default(cuid())
+  month      String // YYYY-MM
+  scope      String // ekip kimliği veya "GENEL"
+  status     String    @default("OPEN") // OPEN | IN_REVIEW | APPROVED | LOCKED
+  preparedBy String?
+  preparedAt DateTime?
+  approvedBy String?
+  approvedAt DateTime?
+  lockedAt   DateTime?
+  note       String?
+
+  @@unique([month, scope])
+  @@schema("hr")
 }

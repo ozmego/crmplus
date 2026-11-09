@@ -97,6 +97,27 @@ Kaynak = import batch veya kaynak tipi (casino X, web formu…).
 | Mükerrer inceleme kuyruğu | `ReviewItem` `OPEN` (tipe göre) |
 | Ekip kapasitesi | Ekip başına: aktif temsilci, açık görev, temsilci başına açık görev, bugün aranan |
 | Olağan dışı erişim | `AccessAlert` `OPEN` (önem derecesine göre) |
+| Transkript sorunları | Son 30 gün: `Transcript` `FAILED` + `Recording` `FAILED` + `Transcript` `LOW_CONFIDENCE` (güven < 0,6) |
+| İnsan incelemesi bekleyen | `CallAnalysis.reviewStatus = PENDING`; alt satır: bunlardan sonuç/özet uyuşmazlığı olanlar |
+
+## 7a. Ses analizi raporları (tanımlar)
+
+Uygulama durumu: operasyon panelindeki iki kart (yukarıda) ve `/calls` filtreleri hazır; aşağıdaki göstergelerin ayrı rapor ekranı Aşama 2 analiz doğruluk paneliyle gelir.
+
+Genel panolarda yalnız **toplulaştırılmış** gösterilir; kişi bazlı içerik yalnız `/calls` yetkili inceleme ekranında. Hiçbiri personel sıralaması veya puanı için kullanılmaz.
+
+| Gösterge | Formül | Zaman aralığı | Hariç tutulanlar | Kapsam |
+|---|---|---|---|---|
+| Transkript oranı | `Transcript DONE+LOW_CONFIDENCE` / `Recording STORED` | Seçilen dönem | Karar kapısı kapalıyken veya misafir istemediği için atılan kayıtlar (`DISCARDED`) | Rol kapsamı |
+| Düşük güven oranı | `LOW_CONFIDENCE` / tamamlanan transkript | Seçilen dönem | `FAILED` | Rol kapsamı |
+| Etiket düzeltme oranı | `AnalysisReview` `CORRECTED` / incelenen öneri | Seçilen dönem | Bekleyen öneriler | Rol kapsamı |
+| Sonuç/özet uyuşmazlığı | `dispositionMismatch = true` / analiz | Seçilen dönem | — | Rol kapsamı |
+| İnceleme kuyruğu yaşı | `now − CallAnalysis.createdAt` medyan ve P95 (`PENDING`) | Anlık | — | Rol kapsamı |
+| Konu dağılımı | Onaylanan/düzeltilen önerilerde etiket sayıları | Seçilen dönem | Onaylanmamış öneriler | Toplulaştırılmış |
+| Takip aksiyonu tamamlanma | Onaylanan aksiyonla oluşan geri aramalardan `DONE` olan / toplam | Seçilen dönem | İptal edilenler | Rol kapsamı |
+| Kelime hata oranı (WER) | İnsan düzeltmesi yapılan bölütlerde düzenleme mesafesi / kelime sayısı | Aylık | Düzeltilmemiş bölütler | Yalnız yönetim |
+
+Veri sözlüğü kuralı: raporda her göstergenin formülü, zaman aralığı, hariç tutulanlar ve erişim kapsamı ekranda görünür ve bu tabloyla birebir aynıdır.
 
 ## 8. Dışa aktarma
 
@@ -107,6 +128,6 @@ Kaynak = import batch veya kaynak tipi (casino X, web formu…).
 ## Açık sorular
 
 1. “Dönüşüm” nasıl tanımlanmalı: trip’e katılım mı, casino ziyareti mi, belirli bir oyun hacmi mi?
-2. Mesai/vardiya tanımı var mı? (Doluluk oranı için gerekli.)
+2. ~~Mesai/vardiya tanımı var mı?~~ Personel ve Puantaj modülünde (Aşama 1B) vardiya çizelgesinden gelecek; doluluk oranı o zaman eklenir.
 3. Hedef değerler (geri arama > %85 vb.) uygun mu?
 4. Personel kendi ekip ortalamasını görmeli mi? (Taslak: evet, isimsiz ortalama olarak.)

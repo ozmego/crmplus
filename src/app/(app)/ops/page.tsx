@@ -46,6 +46,8 @@ export default async function OpsPage() {
         <Card label="İçe aktarma hata kuyruğu" value={cards.importIssues.length} sub="son 30 gün, hatalı satırlı dosya" href="/imports" />
         <Card label="İnceleme kuyruğu" value={reviewTotal} sub={Object.entries(cards.review).map(([k, v]) => `${v} ${KIND[k] ?? k}`).join(" · ") || "boş"} href="/review" tone={reviewTotal ? "warn" : undefined} />
         <Card label="Erişim uyarıları" value={cards.alertsOpen} sub={`son 24 saatte ${cards.denied24h} yetkisiz deneme`} href="/admin/audit?tab=access&action=denied" tone={cards.denied24h ? "critical" : undefined} />
+        <Card label="Transkript sorunları" value={cards.speech.transcriptFailed + cards.speech.recordingFailed + cards.speech.transcriptLow} sub={`son 30 gün · ${cards.speech.transcriptFailed} başarısız · ${cards.speech.recordingFailed} kayıt alınamadı · ${cards.speech.transcriptLow} düşük güven`} href="/calls?f=low" tone={cards.speech.transcriptFailed + cards.speech.recordingFailed ? "warn" : undefined} />
+        <Card label="İnsan incelemesi bekleyen" value={cards.speech.analysisPending} sub={`${cards.speech.analysisMismatch} sonuç/özet uyuşmazlığı`} href="/calls?f=pending" tone={cards.speech.analysisMismatch ? "warn" : undefined} />
       </section>
 
       <section className="card bg-white">
@@ -59,6 +61,7 @@ export default async function OpsPage() {
               <tr>
                 <th scope="col">Ekip</th>
                 <th scope="col">Aktif personel</th>
+                <th scope="col">Vardiyada (plan / şu an)</th>
                 <th scope="col">Açık görev / kişi</th>
                 <th scope="col">Arama</th>
                 <th scope="col">Konuşma</th>
@@ -68,11 +71,12 @@ export default async function OpsPage() {
               </tr>
             </thead>
             <tbody className="tabular-nums">
-              {teams.length === 0 && <tr><td colSpan={8} className="py-4 text-center text-muted">Ekip tanımlı değil.</td></tr>}
+              {teams.length === 0 && <tr><td colSpan={9} className="py-4 text-center text-muted">Ekip tanımlı değil.</td></tr>}
               {teams.map((t) => (
                 <tr key={t.name}>
                   <th scope="row" className="px-3 py-2 text-left font-semibold">{t.name}</th>
                   <td>{t.activeAgents}</td>
+                  <td className="tabular-nums">{t.plannedToday} / {t.onShiftNow}</td>
                   <td>{t.tasksPerAgent === null ? "—" : t.tasksPerAgent.toFixed(1).replace(".", ",")}</td>
                   <td>{t.callsToday}</td>
                   <td>{hm(t.talkSecToday)}</td>

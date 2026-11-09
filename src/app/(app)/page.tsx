@@ -10,5 +10,8 @@ export default async function Home() {
   if (can(u, "finance.view")) redirect("/finance");
   if (can(u, "audit.view")) redirect("/admin/audit");
   if (can(u, "user.view")) redirect("/admin/users");
+  if (can(u, "hr.employee.view")) redirect("/hr/employees");
+  if (can(u, "route.checkin")) redirect("/hr/my-route");
+  if (can(u, "attendance.view")) redirect("/hr");
   return <p className="callout-info">Hesabınıza henüz bir rol atanmamış. Yöneticinize başvurun.</p>;
 }

@@ -10,11 +10,11 @@ Durum: **Taslak** · Sahibi: Çağrı merkezi müdürü
               └──────────── (Bitir, bağlanmadı) ────────────────────┘
 ```
 
-| Zaman damgası | Ne zaman yazılır | Kaynak (Aşama 1 / Aşama 2) |
+| Zaman damgası | Ne zaman yazılır | Kaynak: santral modu (`PBX_PROVIDER=pbx-http`) / manuel yedek mod |
 |---|---|---|
-| `startedAt` | “Ara” tıklandığında | Sunucu saati / santral webhook |
-| `answeredAt` | “Bağlandı” tıklandığında | Temsilci / santral webhook |
-| `endedAt` | “Bitir” tıklandığında | Temsilci / santral webhook |
+| `startedAt` | “Ara” tıklandığında | Sunucu saati (her iki mod) |
+| `answeredAt` | Çağrı bağlandığında | Santral webhook’u `answered` / temsilci “Bağlandı” |
+| `endedAt` | Çağrı bittiğinde | Santral webhook’u `ended` / temsilci “Bitir” |
 | `closedAt` | Sonuç kodu kaydedildiğinde | Sunucu |
 
 Hesaplanan süreler:
@@ -27,7 +27,10 @@ Kurallar:
 - Bir temsilcinin aynı anda tek açık çağrısı olabilir.
 - `talkSec` 0 olup sonuç “Ulaşıldı” ise uyarı gösterilir (“Bağlandı” tıklanmamış).
 - 4 saatten uzun açık kalan çağrı otomatik olarak `endedAt = startedAt + 4 saat` ile kapatılır, `autoClosed` işaretlenir ve raporlarda veri kalitesi sorunu olarak sayılır.
-- Aşama 2’de santral süresi ile temsilci süresi farklıysa santral esas alınır, fark raporlanır.
+- Santral modunda süreler **santralden** gelir (`talkSec` = santralin bildirdiği konuşma süresi). Temsilcinin işaretlediği süre ile fark varsa santral esas alınır, fark AuditLog’a yazılır.
+- Santrale ulaşılamazsa çağrı **manuel moda** düşer, `TelephonyIncident` açılır ve temsilci softphone bağlantısıyla devam eder; manuel mod yalnız yedektir.
+- Santral webhook’u imzalıdır (HMAC-SHA256, ±5 dk); aynı olay iki kez gelirse yok sayılır.
+- **Kayıt bildirimi adımı**: çağrı ekranında “Kayıt bildirimi yapıldı” işaretlenir; misafir kayıt istemezse “Misafir kayıt istemiyor” seçilir ve kayıt saklanmaz (docs/09 §3).
 
 ## 2. Sonuç kodları
 

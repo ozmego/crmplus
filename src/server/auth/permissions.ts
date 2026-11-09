@@ -81,6 +81,23 @@ export const PERMISSIONS = {
   "finance.period.lock": "Dönem kapatma",
   "finance.adjust": "Düzeltme/iptal",
   "finance.export": "Finans dışa aktarımı",
+  // Personel ve puantaj (Aşama 1B, docs/11)
+  "hr.employee.view": "Personel kayıtlarını görme",
+  "hr.employee.edit": "Personel kaydı düzenleme",
+  "roster.view": "Vardiya çizelgesi görme",
+  "roster.manage": "Vardiya çizelgesi düzenleme",
+  "roster.publish": "Vardiya çizelgesi yayınlama",
+  "route.manage": "Saha rotası planlama",
+  "route.checkin": "Kendi rotasında vardım/ayrıldım",
+  "attendance.view": "Puantaj görme",
+  "attendance.adjust": "Puantaj düzeltme (gerekçeli)",
+  "leave.request": "İzin talebi",
+  "leave.preapprove": "İzin ön onayı",
+  "leave.approve": "İzin son onayı",
+  "timesheet.prepare": "Puantaj dönemini hazırlama",
+  "timesheet.approve": "Puantaj dönemini onaylama",
+  "timesheet.lock": "Puantaj dönemini kilitleme",
+  "timesheet.export": "Puantaj Excel dışa aktarımı",
 } as const;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -108,7 +125,7 @@ export const DEFAULT_ROLES: RoleDef[] = [
     grants: [
       "user.view", "user.manage", "role.manage", "role.assign", "team.manage",
       "settings.manage", "integration.manage", "audit.view", "alert.view", "alert.resolve",
-      "emergency.access", "block.create",
+      "emergency.access", "block.create", ["roster.view", "own"], ["attendance.view", "own"], ["leave.request", "own"],
     ],
   },
   {
@@ -124,6 +141,7 @@ export const DEFAULT_ROLES: RoleDef[] = [
       "campaign.view", "campaign.manage", "segment.manage", "transcript.view", "analysis.review",
       "message.campaign.prepare", "message.campaign.approve", "message.template.manage",
       "report.view", "report.product", "export.basic", "export.bulk", "team.manage", "alert.view", "user.view",
+      "hr.employee.view", "roster.view", "roster.manage", "roster.publish", "route.manage", "attendance.view", ["leave.request", "own"],
     ],
   },
   {
@@ -136,6 +154,8 @@ export const DEFAULT_ROLES: RoleDef[] = [
       "consent.exception.request", "block.create", "queue.view", "call.make", "call.view", "callback.manage",
       "task.view", "task.create", "task.assign", "campaign.view", "recording.listen", "transcript.view",
       "transcript.edit", "analysis.review", "qa.review", "message.send.single", "report.view", "export.basic",
+      "hr.employee.view", "roster.view", "roster.manage", "roster.publish", "route.manage", "attendance.view", "attendance.adjust",
+      "leave.preapprove", "timesheet.prepare", ["leave.request", "own"],
     ],
   },
   {
@@ -146,7 +166,7 @@ export const DEFAULT_ROLES: RoleDef[] = [
     grants: [
       "guest.view", "guest.edit", "field.notes", "consent.view", "block.create", "queue.view", "call.make",
       "call.view", "callback.manage", "task.view", "transcript.view", "transcript.edit", "analysis.review",
-      "message.send.single", "report.view",
+      "message.send.single", "report.view", ["roster.view", "own"], ["attendance.view", "own"], ["leave.request", "own"],
     ],
   },
   {
@@ -157,7 +177,7 @@ export const DEFAULT_ROLES: RoleDef[] = [
     grants: [
       "guest.view", "consent.view", "consent.edit", "block.create", "import.create", "import.apply", "import.rollback", "import.view",
       "compare.run", "review.view", "review.resolve", "mapping.template.manage", "export.basic",
-      ["report.view", "own"],
+      ["report.view", "own"], ["roster.view", "own"], ["attendance.view", "own"], ["leave.request", "own"],
     ],
   },
   {
@@ -167,7 +187,7 @@ export const DEFAULT_ROLES: RoleDef[] = [
     defaultScope: "all",
     grants: [
       "field.financial", "finance.view", "finance.contract.manage", "finance.result.edit", "finance.calc.prepare",
-      "finance.calc.approve", "finance.period.lock", "finance.adjust", "finance.export", "block.create",
+      "finance.calc.approve", "finance.period.lock", "finance.adjust", "finance.export", "block.create", ["roster.view", "own"], ["attendance.view", "own"], ["leave.request", "own"],
     ],
   },
   {
@@ -175,7 +195,24 @@ export const DEFAULT_ROLES: RoleDef[] = [
     name: "Denetçi",
     description: "Salt okunur işlem ve erişim geçmişi; değişiklik ve dışa aktarma yok.",
     defaultScope: "all",
-    grants: ["audit.view", "alert.view", "user.view"],
+    grants: ["audit.view", "alert.view", "user.view", ["roster.view", "own"], ["attendance.view", "own"], ["leave.request", "own"]],
+  },
+  {
+    key: "hr",
+    name: "İK",
+    description: "Personel kayıtları, izin son onayı, puantaj onayı/kilidi/dışa aktarımı; misafir ve finans verisi yok.",
+    defaultScope: "all",
+    grants: [
+      "hr.employee.view", "hr.employee.edit", "roster.view", "attendance.view", "attendance.adjust", "leave.approve",
+      "timesheet.prepare", "timesheet.approve", "timesheet.lock", "timesheet.export", ["leave.request", "own"],
+    ],
+  },
+  {
+    key: "field_staff",
+    name: "Saha personeli",
+    description: "Kendi rotası ve check-in, kendi çizelgesi ve puantajı; rotadaki misafirin yalnız adı.",
+    defaultScope: "own",
+    grants: ["route.checkin", "roster.view", "attendance.view", "leave.request"],
   },
 ];
 
@@ -183,4 +220,5 @@ export const DEFAULT_ROLES: RoleDef[] = [
 export const REASON_REQUIRED: ReadonlySet<string> = new Set([
   "role.assign", "field.contact.full", "export.basic", "export.bulk", "emergency.access",
   "block.remove", "recording.listen", "recording.download", "finance.adjust", "finance.export",
+  "attendance.adjust", "timesheet.export",
 ]);

@@ -20,7 +20,7 @@ function resolveKey(storageKey: string): string {
   return path.join(ROOT(), storageKey);
 }
 
-export async function putEncrypted(bucket: "imports", data: Buffer): Promise<string> {
+export async function putEncrypted(bucket: "imports" | "recordings", data: Buffer): Promise<string> {
   const storageKey = `${bucket}/${randomUUID()}`;
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key(), iv);

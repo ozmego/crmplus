@@ -15,6 +15,24 @@ import {
   setRowDecisions,
 } from "@/server/services/imports";
 import { MAX_FILE_BYTES } from "@/server/import/parse";
+import { db } from "@/server/db";
+import { enqueue } from "@/server/queue";
+
+/** Büyük dosyalar (varsayılan 5.000 satır üstü) arka plan işçisinde işlenir. */
+async function runsInWorker(batchId: string) {
+  const b = await db.importBatch.findUnique({ where: { id: batchId }, select: { summary: true } });
+  return Number((b?.summary as { rowCount?: number } | null)?.rowCount ?? 0) > Number(process.env.IMPORT_INLINE_MAX_ROWS ?? 5000);
+}
+
+async function queueImport(batchId: string, userId: string, job: "preview" | "apply") {
+  const b = await db.importBatch.findUniqueOrThrow({ where: { id: batchId } });
+  if (job === "apply") {
+    if (b.status !== "PREVIEWED") throw new ImportError("BAD_STATUS");
+    await db.importBatch.update({ where: { id: batchId }, data: { status: "APPLYING" } });
+  }
+  await db.importBatch.update({ where: { id: batchId }, data: { summary: { ...((b.summary as object) ?? {}), job, jobError: null } } });
+  await enqueue("imports", job, { batchId, userId }, { jobId: job + "-" + batchId + "-" + Date.now() });
+}
 
 export type ActionState = { error?: string } | undefined;
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -57,6 +75,10 @@ export async function saveMappingAction(batchId: string, mapping: Record<string,
   const r = await run(async () => {
     const user = await requirePermission("import.create");
     await saveMapping(user, batchId, mappingSchema.parse(mapping), sheet);
+    if (await runsInWorker(batchId)) {
+      await queueImport(batchId, user.id, "preview");
+      return { queued: true as const };
+    }
     return buildPreview(user, batchId);
   });
   revalidatePath(`/imports/${batchId}`);
@@ -79,7 +101,14 @@ export async function decideAllAction(batchId: string, decision: "KEEP" | "USE_N
 }
 
 export async function applyAction(batchId: string) {
-  const r = await run(async () => applyImport(await requirePermission("import.apply"), batchId));
+  const r = await run(async () => {
+    const user = await requirePermission("import.apply");
+    if (await runsInWorker(batchId)) {
+      await queueImport(batchId, user.id, "apply");
+      return { queued: true as const, created: 0, updated: 0, review: 0 };
+    }
+    return { queued: false as const, ...(await applyImport(user, batchId)) };
+  });
   revalidatePath(`/imports/${batchId}`);
   return r;
 }

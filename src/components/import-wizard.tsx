@@ -228,7 +228,7 @@ export function PreviewActions({ batchId, pending: pendingCount, canApply, compa
               start(async () => {
                 setErr(null);
                 const r = await applyAction(batchId);
-                if (r.ok) { setDone(`Uygulandı: ${r.data.created} yeni, ${r.data.updated} güncellenen, ${r.data.review} incelemeye gönderilen kayıt.`); router.refresh(); }
+                if (r.ok) { setDone(r.data.queued ? "Büyük dosya: uygulama arka planda sürüyor; tamamlanınca bu sayfa güncellenir." : `Uygulandı: ${r.data.created} yeni, ${r.data.updated} güncellenen, ${r.data.review} incelemeye gönderilen kayıt.`); router.refresh(); }
                 else setErr(r.error);
               })
             }

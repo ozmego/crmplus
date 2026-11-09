@@ -10,11 +10,16 @@ const NAV: { href: string; key: string; perm: Permission }[] = [
   { href: "/queue", key: "queue", perm: "queue.view" },
   { href: "/guests", key: "guests", perm: "guest.view" },
   { href: "/imports", key: "imports", perm: "import.view" },
+  { href: "/compare", key: "compare", perm: "compare.run" },
   { href: "/review", key: "review", perm: "review.view" },
+  { href: "/calls", key: "calls", perm: "call.view" },
+  { href: "/messages", key: "messages", perm: "message.campaign.prepare" },
   { href: "/reports", key: "reports", perm: "report.view" },
   { href: "/finance", key: "finance", perm: "finance.view" },
+  { href: "/hr", key: "hr", perm: "attendance.view" },
   { href: "/admin/users", key: "admin", perm: "user.view" },
   { href: "/admin/audit", key: "audit", perm: "audit.view" },
+  { href: "/admin/settings", key: "settings", perm: "settings.manage" },
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {

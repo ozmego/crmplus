@@ -7,6 +7,7 @@ import { hashPassword } from "../src/server/auth/password";
 import { DEFAULT_ROLES, type Permission, type Scope } from "../src/server/auth/permissions";
 import { blindIndex, encrypt } from "../src/server/crypto/field-encryption";
 import { normalizePhone } from "../src/lib/phone";
+import { TR_HOLIDAYS } from "../src/lib/hr/leave";
 
 const db = new PrismaClient();
 
@@ -122,8 +123,53 @@ async function seedDemo(password: string) {
   }
 }
 
+/** Personel modülü başlangıç verisi (docs/11): vardiya şablonları, izin türleri, resmi tatiller. */
+const SHIFTS = [
+  { name: "Sabah", startMin: 8 * 60, endMin: 17 * 60, breakMin: 60, color: "#1FA29A" },
+  { name: "Gündüz", startMin: 9 * 60, endMin: 18 * 60, breakMin: 60, color: "#0F6E68" },
+  { name: "Akşam", startMin: 14 * 60, endMin: 23 * 60, breakMin: 60, color: "#E8892B" },
+  { name: "Gece", startMin: 22 * 60, endMin: 6 * 60, breakMin: 30, color: "#12252F" },
+  { name: "Yarım gün", startMin: 9 * 60, endMin: 13 * 60, breakMin: 0, color: "#5E6B73" },
+];
+const LEAVE_TYPES = [
+  { code: "İ", name: "Yıllık izin", paid: true, needsDocument: false },
+  { code: "R", name: "Raporlu", paid: true, needsDocument: true },
+  { code: "Ü", name: "Ücretsiz izin", paid: false, needsDocument: false },
+  { code: "M", name: "Mazeret izni", paid: true, needsDocument: false },
+  { code: "İD", name: "İdari izin", paid: true, needsDocument: false },
+];
+
+async function seedHr() {
+  for (const s of SHIFTS) await db.shiftTemplate.upsert({ where: { name: s.name }, update: s, create: s });
+  for (const t of LEAVE_TYPES) await db.leaveType.upsert({ where: { code: t.code }, update: t, create: t });
+  for (const h of TR_HOLIDAYS) {
+    const date = new Date(`${h.date}T00:00:00Z`);
+    await db.publicHoliday.upsert({ where: { date }, update: {}, create: { date, name: h.name, halfDay: !!h.halfDay } });
+  }
+}
+
+/** Demo: CRM kullanıcılarını personel kaydına bağlar + CRM kullanıcısı olmayan saha/ofis personeli. */
+async function seedHrDemo() {
+  const users = await db.user.findMany({ where: { email: { endsWith: "@crmplus.local" }, NOT: { email: { startsWith: "e2e-" } } }, include: { roles: { include: { role: true } } } });
+  let n = 100;
+  for (const u of users) {
+    if (await db.employee.findUnique({ where: { userId: u.id } })) continue;
+    const keys = u.roles.map((r) => r.role.key);
+    const department = keys.includes("finance") ? "FINANCE" : keys.includes("agent") || keys.includes("team_lead") ? "CALL_CENTER" : keys.includes("ops_manager") || keys.includes("sys_admin") ? "MANAGEMENT" : "OFFICE";
+    const [firstName, ...rest] = u.name.split(" ");
+    await db.employee.create({ data: { sicilNo: `D${++n}`, firstName, lastName: rest.join(" ") || "-", department, teamId: u.teamId, hireDate: new Date("2023-03-01T00:00:00Z"), userId: u.id } });
+  }
+  for (const [sicilNo, firstName, lastName] of [["D201", "Kerem", "Saha"], ["D202", "Elif", "Karşılama"]]) {
+    await db.employee.upsert({ where: { sicilNo }, update: {}, create: { sicilNo, firstName, lastName, department: "FIELD", title: "Host", hireDate: new Date("2021-06-01T00:00:00Z") } });
+  }
+  for (const l of [{ name: "Merit Royal (Girne)", kind: "CASINO", city: "Girne" }, { name: "Ercan Havalimanı", kind: "AIRPORT", city: "Lefkoşa" }, { name: "Elexus Otel", kind: "HOTEL", city: "Girne" }]) {
+    await db.location.upsert({ where: { name: l.name }, update: {}, create: l });
+  }
+}
+
 async function main() {
   await seedRoles();
+  await seedHr();
   for (const [i, d] of DISPOSITIONS.entries()) {
     await db.disposition.upsert({ where: { code: d.code }, update: { ...d, sortOrder: i + 1 }, create: { ...d, sortOrder: i + 1 } });
   }
@@ -133,7 +179,10 @@ async function main() {
   if (!password || password.length < 12) throw new Error("SEED_ADMIN_PASSWORD en az 12 karakter olmalı (.env)");
   await upsertUser(email, "Sistem Yöneticisi", ["sys_admin"], password);
 
-  if (process.env.SEED_DEMO === "1") await seedDemo(password);
+  if (process.env.SEED_DEMO === "1") {
+    await seedDemo(password);
+    await seedHrDemo();
+  }
   console.log("Seed tamamlandı.");
 }
 

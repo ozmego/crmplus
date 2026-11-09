@@ -20,11 +20,16 @@
     "queue": "Arama kuyruğu",
     "guests": "Misafirler",
     "imports": "İçe aktarma",
+    "compare": "Karşılaştırma",
     "review": "İnceleme",
+    "calls": "Çağrılar",
+    "messages": "Mesajlar",
     "reports": "Raporlar",
     "finance": "Finans",
+    "hr": "Personel",
     "admin": "Yönetim",
-    "audit": "Denetim"
+    "audit": "Denetim",
+    "settings": "Ayarlar"
   },
   "auth": {
     "eyebrow": "CRMPLUS · GÜVENLİ GİRİŞ",

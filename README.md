@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# crmPlus
 
-## Getting Started
+Junket operasyonları için şirket içinde çalışan CRM ve çağrı merkezi: kontrollü Excel içe aktarma ve karşılaştırma, izne dayalı arama kuyruğu, bulut santral, ses kaydı ve Türkçe transkript (karar kapısına bağlı), SMS kampanyaları, ayrı bir finans/komisyon modülü ve personel/vardiya/puantaj modülü.
 
-First, run the development server:
+Ürün kuralları ve politikalar: [docs/](docs/README.md) · Uygulama planı: [docs/crmPlus_Uygulama_Plani_v4.pdf](docs/crmPlus_Uygulama_Plani_v4.pdf)
+
+## Geliştirme ortamı
+
+Gerekenler: Node 22+, pnpm, Docker Desktop.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+cp .env.example .env          # anahtarları doldurun (aşağıya bakın)
+pnpm db:up                    # PostgreSQL 16 (127.0.0.1:55433) + Redis (127.0.0.1:56380)
+pnpm db:migrate
+SEED_DEMO=1 pnpm db:seed      # roller, sonuç kodları, yönetici + isteğe bağlı demo verisi
+
+pnpm exec next dev -p 3210    # uygulama → http://localhost:3210
+pnpm worker                   # ayrı terminalde: arka plan işçisi (içe aktarma, kayıt, transkript, SMS, bakım)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+İşçi çalışmıyorsa büyük içe aktarmalar, ses kayıtları, transkriptler ve SMS kampanyaları kuyrukta bekler.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Önemli ortam değişkenleri
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Değişken | Açıklama |
+|---|---|
+| `FIELD_ENCRYPTION_KEY`, `BLIND_INDEX_KEY` | Alan şifreleme ve telefon/e-posta eşleme anahtarları (32 bayt, hex). **Kaybolursa veri okunamaz.** |
+| `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD` | İlk yönetici; ilk girişte şifre değişimi ve MFA zorunlu |
+| `PBX_PROVIDER` | `pbx-http` (bulut santral) veya `manual` (yedek mod) |
+| `PBX_WEBHOOK_SECRET` | Santral webhook imzası (HMAC-SHA256) |
+| `TRANSCRIBER`, `SPEECH_URL`, `SPEECH_TOKEN` | `remote` → şirket içi [speech/](speech/README.md) servisi; `mock` yalnız geliştirme |
+| `SMS_PROVIDER`, `SMS_SEND_URL`, `SMS_API_TOKEN`, `SMS_SENDER` | `sms-http` (üretim) veya `mock` (geliştirme) |
+| `SMS_WEBHOOK_SECRET` | Gelen SMS/teslim raporu webhook imzası |
 
-## Learn More
+Üretimde `mock` sağlayıcılar çalışmaz; yapılandırılmamış servis açık hata verir.
 
-To learn more about Next.js, take a look at the following resources:
+### Webhook'lar
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Santral: `POST /api/telephony/webhook/<sağlayıcı>`
+- SMS: `POST /api/messaging/webhook/<sağlayıcı>`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Başlıklar: `x-crmplus-timestamp` (unix saniye) ve `x-crmplus-signature` = hex HMAC-SHA256(secret, `${timestamp}.${gövde}`). ±5 dakika dışındaki ve tekrarlanan olaylar işlenmez.
 
-## Deploy on Vercel
+## Testler
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+pnpm test                     # birim testleri (Vitest)
+pnpm exec tsc --noEmit && pnpm lint
+pnpm test:e2e                 # uçtan uca (Playwright, Chrome) — dev sunucusu (3210) ve worker çalışıyor olmalı
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+E2E kurulumu yalnız `e2e-*` test hesaplarını ve demo hesaplarının giriş durumunu sıfırlar; her spec farklı bir hesapla giriş yapar.
+
+## Dizinler
+
+```
+docs/            Aşama 0 belgeleri (rol matrisi, alan sözlüğü, izin akışı, KPI, komisyon, ses, mesajlaşma, personel)
+docs/templates/  misafir-import.xlsx (pnpm template:import ile üretilir)
+prisma/          şema (public + finance + hr), göçler, seed
+speech/          şirket içi Türkçe transkript servisi (faster-whisper) — iskelet, GPU'da test edilmedi
+src/app/         ekranlar ve API (Next.js App Router)
+src/server/      servisler, yetkilendirme, şifreleme, santral ve SMS sağlayıcıları
+src/lib/         saf iş kuralları (birim testli)
+src/worker/      BullMQ işçisi (içe aktarma, kayıt, transkript, SMS, bakım, gece puantajı)
+tests/           unit + e2e
+```

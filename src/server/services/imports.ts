@@ -397,7 +397,8 @@ export async function pendingDecisionCount(batchId: string) {
 export async function applyImport(user: Principal, batchId: string) {
   const b = await loadBatch(batchId);
   if (b.purpose === "COMPARE") throw new ImportError("COMPARE_ONLY");
-  if (b.status !== "PREVIEWED") throw new ImportError("BAD_STATUS");
+  // APPLYING: büyük dosyada işçi tarafından devralınmış iş
+  if (b.status !== "PREVIEWED" && b.status !== "APPLYING") throw new ImportError("BAD_STATUS");
   if ((await pendingDecisionCount(batchId)) > 0) throw new ImportError("DECISIONS_PENDING");
 
   const rows = await db.importRow.findMany({ where: { batchId, result: { in: ["NEW", "MATCHED", "CONFLICT", "POSSIBLE", "MULTI_MATCH"] } }, orderBy: { rowNo: "asc" } });
@@ -511,7 +512,7 @@ export async function applyImport(user: Principal, batchId: string) {
     }, { timeout: 120_000 });
   }
 
-  const summary = { ...((b.summary as object) ?? {}), applied: stats };
+  const summary = { ...((b.summary as object) ?? {}), applied: stats, job: null, jobError: null };
   await db.importBatch.update({ where: { id: b.id }, data: { status: "APPLIED", appliedAt: now, summary } });
   await audit({ actorId: user.id, action: "import.apply", entity: "ImportBatch", entityId: b.id, diff: stats });
   return stats;

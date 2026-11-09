@@ -7,6 +7,7 @@ import { parseFile } from "@/server/import/parse";
 import { FIELDS, FIELD_BY_KEY, type Mapping } from "@/lib/import/fields";
 import { pendingDecisionCount } from "@/server/services/imports";
 import { MappingStep, PreviewActions, RollbackForm, RowDecision, type MappingColumn } from "@/components/import-wizard";
+import { AutoRefresh } from "@/components/auto-refresh";
 import type { RowIssue } from "@/lib/import/normalize";
 import type { FieldChange } from "@/lib/import/match";
 
@@ -96,6 +97,19 @@ export default async function ImportDetail({ params, searchParams }: { params: P
     );
   }
 
+  const job = (summary as { job?: string | null; jobError?: string | null }).job;
+  const jobError = (summary as { jobError?: string | null }).jobError;
+  if (job || b.status === "APPLYING") {
+    return (
+      <div className="flex flex-col gap-5">
+        {header}
+        <p role="status" className="callout-info">
+          {job === "apply" || b.status === "APPLYING" ? "Değişiklikler arka planda uygulanıyor." : "Satırlar arka planda doğrulanıyor ve eşleştiriliyor."} Sayfa kendiliğinden güncellenir.
+        </p>
+        <AutoRefresh seconds={5} />
+      </div>
+    );
+  }
   if (b.status === "SCANNED" || b.status === "MAPPED") {
     if (!can(user, "import.create")) return <div className="flex flex-col gap-5">{header}<p className="callout-info">Eşleme bekleniyor.</p></div>;
     const parsed = await parseFile(b.fileName, await getDecrypted(b.storageKey!), b.sheetName);
@@ -108,6 +122,7 @@ export default async function ImportDetail({ params, searchParams }: { params: P
     return (
       <div className="flex flex-col gap-5">
         {header}
+        {jobError && <p className="callout-critical">Arka plan işi başarısız oldu: {jobError}</p>}
         <h2 className="text-lg font-bold text-ink">2 · Sütunları eşleştir</h2>
         <MappingStep batchId={b.id} columns={columns} fields={FIELDS.map((f) => ({ key: f.key, label: f.label }))} sheets={parsed.sheets} sheet={parsed.sheet} />
       </div>

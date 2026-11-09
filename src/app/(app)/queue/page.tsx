@@ -3,6 +3,10 @@ import { requirePage } from "@/server/auth/rbac";
 import { loadQueue } from "@/server/services/queue";
 import { db } from "@/server/db";
 import { CallWorkspace, type QueueRow } from "@/components/call-workspace";
+import { isPbxMode } from "@/server/telephony/provider";
+import { gateOpen, getRecordingGate } from "@/server/services/settings";
+import { currentWorkStatus } from "@/server/services/field-routes";
+import { WorkStatus } from "@/components/work-status";
 
 export const dynamic = "force-dynamic";
 
@@ -10,10 +14,12 @@ export default async function QueuePage() {
   const user = await requirePage("queue.view");
   const t = await getTranslations("queue");
   const locale = await getLocale();
-  const [{ items, blocked }, dispositions, openCall] = await Promise.all([
+  const gate = await getRecordingGate();
+  const [{ items, blocked }, dispositions, openCall, ws] = await Promise.all([
     loadQueue(user),
     db.disposition.findMany({ orderBy: { sortOrder: "asc" } }),
     db.call.findFirst({ where: { agentId: user.id, closedAt: null }, select: { id: true, taskId: true, startedAt: true, answeredAt: true, endedAt: true } }),
+    currentWorkStatus(user.id),
   ]);
 
   const rows: QueueRow[] = items.map((i) => ({
@@ -42,6 +48,7 @@ export default async function QueuePage() {
         <h1 className="page-title">{t("title")}</h1>
         <p className="mt-1 text-sm text-muted">{t("hint")}</p>
       </div>
+      <WorkStatus status={ws.status} since={ws.since?.toISOString() ?? null} />
       {blocked > 0 && (
         <p className="callout-info">
           {blocked} görev uygunluk kontrolünden geçemediği için kuyruktan çıkarıldı (izin, durdurma veya numara durumu).
@@ -50,6 +57,8 @@ export default async function QueuePage() {
       <CallWorkspace
         rows={rows}
         locale={locale}
+        pbxMode={isPbxMode()}
+        recordingNotice={gateOpen(gate) ? gate.noticeText : null}
         dispositions={dispositions.map((d) => ({ code: d.code, label: locale === "en" ? d.labelEn : d.labelTr, noteRequired: d.noteRequired }))}
         openCall={
           openCall

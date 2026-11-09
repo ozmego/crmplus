@@ -6,7 +6,7 @@ import { decrypt, encrypt } from "@/server/crypto/field-encryption";
 import { checkEligibility } from "@/lib/eligibility";
 import { planDisposition, type DispositionCode } from "@/lib/disposition";
 import { redactSensitive } from "@/lib/redact";
-import { getTelephonyProvider } from "@/server/telephony/provider";
+import { dialWithFallback } from "@/server/telephony/provider";
 import { applyContactBlock } from "@/server/services/consent";
 
 export class CallError extends Error {
@@ -56,11 +56,12 @@ export async function startCall(user: Principal, taskId: string) {
   await db.task.update({ where: { id: task.id }, data: { status: "IN_PROGRESS", attempts: { increment: 1 } } });
   await db.agentStatusLog.create({ data: { userId: user.id, status: "ON_CALL" } });
 
-  const dial = await getTelephonyProvider().dial({ e164: decrypt(phone.e164Enc), callId: call.id });
+  const agent = await db.user.findUnique({ where: { id: user.id }, select: { extension: true } });
+  const dial = await dialWithFallback({ e164: decrypt(phone.e164Enc), agentExtension: agent?.extension, callId: call.id });
   if (dial.externalId) {
     await db.call.update({ where: { id: call.id }, data: { provider: dial.provider, externalId: dial.externalId } });
   }
-  return { callId: call.id, startedAt: now.toISOString(), dialUri: dial.dialUri ?? null, provider: dial.provider };
+  return { callId: call.id, startedAt: now.toISOString(), dialUri: dial.dialUri ?? null, provider: dial.provider, fallback: !!dial.fallback };
 }
 
 async function ownOpenCall(user: Principal, callId: string) {

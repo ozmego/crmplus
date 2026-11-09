@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { ForbiddenError, requirePermission } from "@/server/auth/rbac";
+import { DEFAULT_GATE, getRecordingGate, setSetting, type RecordingGate } from "@/server/services/settings";
 import {
   createUser,
   disableUser,
@@ -67,6 +68,49 @@ export async function upsertTeamAction(input: { id?: string; name: string; leade
     const actor = await requirePermission("team.manage");
     const p = z.object({ id: z.string().optional(), name: z.string().trim().min(2).max(80), leaderId: z.string().nullable().optional() }).parse(input);
     await upsertTeam(actor, p, reason.parse(why));
+    return true;
+  });
+}
+
+// ───────────── Ayarlar: karar kapısı ve saklama süreleri ─────────────
+
+const gateSchema = z.object({
+  checklist: z.object({
+    legalBasis: z.boolean(), noticeText: z.boolean(), retention: z.boolean(),
+    vendorDataUse: z.boolean(), accessMatrix: z.boolean(), guestPreferenceFlow: z.boolean(),
+  }),
+  noticeText: z.string().trim().min(20).max(500),
+  legalRef: z.string().trim().max(300),
+});
+
+/** Karar kapısı: altı onayın tamamı işaretlenince açılır; herhangi biri kaldırılırsa anında kapanır. */
+export async function saveGateAction(input: z.input<typeof gateSchema>, why: string) {
+  return run(async () => {
+    const actor = await requirePermission("settings.manage");
+    const p = gateSchema.parse(input);
+    const prev = await getRecordingGate();
+    const allChecked = Object.values(p.checklist).every(Boolean);
+    const next: RecordingGate = {
+      ...DEFAULT_GATE, ...p,
+      approvedAt: allChecked ? prev.approvedAt ?? new Date().toISOString() : null,
+      approvedBy: allChecked ? prev.approvedBy ?? actor.id : null,
+    };
+    await setSetting(actor.id, "recording.gate", next, reason.parse(why));
+    return { open: allChecked };
+  });
+}
+
+const retentionSchema = z.object({
+  audioDays: z.number().int().min(1).max(3650),
+  rawTranscriptDays: z.number().int().min(1).max(365),
+  importFileDays: z.number().int().min(1).max(365),
+  listenGrantHours: z.number().int().min(1).max(168),
+});
+
+export async function saveRetentionAction(input: z.input<typeof retentionSchema>, why: string) {
+  return run(async () => {
+    const actor = await requirePermission("settings.manage");
+    await setSetting(actor.id, "retention", retentionSchema.parse(input), reason.parse(why));
     return true;
   });
 }

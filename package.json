@@ -11,7 +11,10 @@
     "db:up": "docker compose -f docker-compose.dev.yml up -d",
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "worker": "tsx --env-file=.env --require ./src/worker/server-only-shim.cjs src/worker/index.ts",
+    "test:e2e": "playwright test",
+    "template:import": "tsx scripts/make-import-template.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",

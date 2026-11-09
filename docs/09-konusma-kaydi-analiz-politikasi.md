@@ -1,86 +1,86 @@
-# 09 — Konuşma Kaydı ve Analiz Politikası (Aşama 2)
+# 09 — Ses Kaydı ve Türkçe Analiz Politikası (Aşama 1, karar kapısına bağlı)
 
-Durum: **Taslak — hukuk teyidi bekliyor** · Sahibi: Uyum + çağrı merkezi müdürü
+Durum: **Taslak — hukuk teyidi bekliyor** · Sahibi: Uyum + çağrı merkezi müdürü · Plan v4 §4 ile hizalı
 
 ## 1. Amaç ve sınırlar
 
-Kayıt ve analiz şu amaçlarla yapılır: hizmet kalitesi, mevzuata ve iç kurallara uyum, misafir taleplerinin (özellikle iletişim durdurma) doğru işlendiğinin ispatı, temsilci koçluğu.
+Kayıt ve analiz şu amaçlarla yapılır: hizmet kalitesi, iç kurallara uyum, misafir taleplerinin (özellikle iletişim durdurma) doğru işlendiğinin ispatı, temsilci koçluğu, geri arama/aktarma takibinin unutulmaması.
 
-Şu amaçlarla **kullanılmaz**:
-- Otomatik skorla tek başına disiplin, ücret veya işten çıkarma kararı
-- Misafirin duygu durumuna göre pazarlama baskısının artırılması
-- Sorumlu oyun sinyallerinin pazarlama hedeflemesinde kullanılması (bu sinyaller yalnız korumaya yönelik kullanılır)
+Sistem şunları **üretmez ve saklamaz**: duygu, kişilik, ikna edilebilirlik, kumar davranışı, kayıp temelli risk/değer skoru, otomatik kalite puanı. Analiz çıktısının şemasında bu alanlar yoktur (şema testi: `tests/unit/speech-analysis.test.ts`).
 
-## 2. Bildirim ve rıza
+Otomatik analiz yalnız **öneri** üretir. Çalışan ya da misafir aleyhine tek başına karar, puan, yaptırım veya sıralama üretmez; her öneri bir insan tarafından onaylanır, düzeltilir veya itiraz edilir.
 
-- Her çağrının başında otomatik anons (santral tarafından, temsilci bağlanmadan önce):
-  > TR: “Hizmet kalitesi ve güvenliğiniz için bu görüşme kayıt altına alınmaktadır. Kayıt istemiyorsanız lütfen temsilcimize iletiniz.”
-  > EN: “This call is recorded for quality and security purposes. If you do not wish to be recorded, please tell our representative.”
-- Misafir itiraz ederse temsilci “Kaydı durdur” düğmesine basar. Santral API’siyle kayıt durdurulur ve o noktadan sonra kayıt alınmaz. Durdurmadan önceki kısım saklanır mı? ⚖️ HUKUK (taslak: itiraz anına kadar olan kısım da silinir; yalnız “kayıt itirazı” meta verisi kalır).
-- Misafirin “kayıt istemiyorum” tercihi `recordingOptOut` olarak saklanır; sonraki çağrılarda kayıt baştan kapalı başlar.
-- ⚖️ HUKUK: Kayıt için açık rıza mı yoksa aydınlatma + meşru menfaat mi yeterli; temsilcilerin (çalışanların) kaydı için aydınlatma metni.
+## 2. Karar kapısı
 
-## 3. Saklama
+Aşağıdaki altı koşulun her biri **Ayarlar → Ses karar kapısı** ekranında ayrı ayrı onaylanmadan santralden gelen kayıtlar saklanmaz (`DISCARDED / GATE_CLOSED`) ve analiz çalışmaz:
+
+1. Hukuki dayanak belirlendi (açık rıza / aydınlatma + meşru menfaat) ⚖️
+2. Misafir bilgilendirme metni (anons) onaylandı
+3. Ses, transkript, analiz ve dosya saklama süreleri onaylandı
+4. Ses/ASR tedarikçisinin veri kullanımı değerlendirildi (bkz. §8)
+5. Erişim matrisi onaylandı (bkz. §5)
+6. Misafirin kayıt istememe akışı onaylandı
+
+Kapı onayı gerekçe ister ve AuditLog'a yazılır. Kapı kapatılırsa yeni kayıtlar yine atılır; mevcut kayıtlar saklama süresine göre silinir.
+
+## 3. Bilgilendirme ve tercih
+
+- Her çağrının başında anons (santral) veya temsilci bildirimi:
+  > TR: “Hizmet kalitesi için bu görüşme kayıt altına alınmaktadır. Kayıt istemiyorsanız lütfen temsilcimize iletiniz.”
+  > EN: “This call is recorded for quality purposes. If you do not wish to be recorded, please tell our representative.”
+- Çağrı ekranında temsilci “Kayıt bildirimi yapıldı” ve gerekirse “Misafir kayıt istemiyor” işaretler (`Call.recordingNotice`, `Call.recordingPreference`).
+- Misafir istemezse: o çağrının kaydı saklanmaz (`DISCARDED / GUEST_DECLINED`), tercih `ConsentRecord(channel = RECORDING, status = DENIED)` olarak zaman damgasıyla saklanır; sonraki çağrılarda kuyruk ve çağrı ekranı “kayıtsız” gösterir.
+- ⚖️ HUKUK: itiraz anından önceki kısım da silinir mi? Uygulama: itiraz eden çağrının kaydı **tamamen** atılır, yalnız meta veri kalır.
+
+## 4. Akış (uygulanan)
+
+1. **Santral webhook'u** (imzalı, ±5 dk) kayıt hazır olayını bildirir → kayıt kuyruğa alınır.
+2. **İndirme** (`recordings` kuyruğu): ses şifreli (AES-256-GCM) depoya yazılır, SHA-256 ve süre saklanır; santral indirme adresi şifreli tutulur ve indirmeden sonra silinir.
+3. **Transkript** (`speech` kuyruğu, şirket içi `speech/` servisi, faster-whisper `large-v3-turbo`, `language = tr`): stereo kayıtta kanal 0 = temsilci, kanal 1 = misafir. Kurum sözlüğü (casino, otel, kişi adları) ilk istem olarak verilir.
+4. **Maskeleme**: telefon, IBAN, kart, TC kimlik no, e-posta → `[TELEFON]`, `[IBAN]`, `[KART]`, `[TCKN]`, `[EPOSTA]`. Ham metin şifreli ve kısa süreli saklanır, hiçbir ekranda gösterilmez.
+5. **Öneri** (kural sürümü `RULES_VERSION`, isteğe bağlı yerel LLM özeti — Ollama): kısa özet, sabit listeden konu etiketleri, geri arama/aktarma aksiyonu (tarih-saat çıkarımı), süreç uyarıları (kayıt bildirimi, kendini tanıtma, iletişim durdurma talebi ↔ sonuç kodu tutarlılığı).
+6. **İnsan incelemesi**: onay (aksiyon önerisi onaylanınca geri arama/görev oluşur), düzeltme, itiraz. Transkript bölütü düzeltmesi eski/yeni metinle `TranscriptEdit`'e yazılır.
+
+Düşük güvenli (< 0,6) transkriptler ve sonuç/özet uyuşmazlıkları inceleme kuyruğuna düşer; operasyon panelinde toplulaştırılmış sayı olarak görünür.
+
+## 5. Erişim
+
+| Rol | Ses dinleme | Maskelenmiş transkript | Öneri inceleme |
+|---|---|---|---|
+| Takım lideri | Ekibi; gerekçe + 24 saatlik süreli izin | Ekibi | Ekibi |
+| Çağrı personeli | — | Kendi çağrıları | Kendi çağrıları |
+| Operasyon yöneticisi | — | Tümü | Tümü (düzeltme yok) |
+| Sistem yöneticisi | — | — | — (karar kapısı ve saklama ayarı) |
+| Finans, Veri yükleyici, Denetçi | — | — | — |
+
+- Ses indirme (`recording.download`) varsayılan rollerde **kimsede yoktur**; hukuki talepte geçici ve iki onayla verilir.
+- Her dinleme AccessLog'a yazılır; olağan dışı dinleme hacmi erişim uyarısı üretir (docs/08).
+- Kişi bazlı görüşme içeriği yalnız yetkili inceleme ekranında (`/calls`) görünür; genel panolar toplulaştırılmıştır.
+
+## 6. Saklama (varsayılan; Ayarlar'dan değiştirilebilir, ⚖️ HUKUK teyidi)
 
 | Veri | Süre | Not |
 |---|---|---|
-| Ses | 90 gün | Uyum ihlali veya şikâyet bayrağı varsa inceleme kapanana kadar uzatılır (en fazla 1 yıl) |
-| Ham transkript | 30 gün | Yalnız `transcript.view.raw` |
+| Ses | 90 gün | Şikâyet/uyum incelemesi açıksa kapanana kadar (en fazla 1 yıl) |
+| Ham transkript (şifreli) | 30 gün | Hiçbir ekranda gösterilmez |
 | Maskelenmiş transkript | 1 yıl | |
-| Skorlar, bayraklar, QA değerlendirmeleri | 2 yıl | Koçluk geçmişi |
-| Sağlayıcıdaki kopya | Şirket sunucusuna alındıktan sonra silinir (sağlayıcı izin veriyorsa) | |
+| Analiz önerisi ve inceleme kararı | 1 yıl | Model/kural sürümü ve güvenle birlikte |
+| Santraldeki kopya | Şirket deposuna alındıktan sonra silinir (sağlayıcı izin veriyorsa) | |
 
-## 4. Erişim
+Saklama temizliği her gece 03:15 (Europe/Istanbul) çalışır. Aşama 1'de otomatik silinenler: ses ve ham transkript. Maskelenmiş transkript ve analiz önerisinin 1 yıl sonunda silinmesi Aşama 2'de otomatikleşecek; o zamana kadar `retention.execute` yetkisiyle elle yürütülür.
 
-| Rol | Ses | Ham transkript | Maskelenmiş transkript | Skor |
-|---|---|---|---|---|
-| Kalite analisti | Dinler (gerekçe) | ✅ | ✅ | ✅ |
-| Takım lideri | Ekibi, gerekçeyle dinler | — | Ekibi | Ekibi |
-| Çağrı personeli | — | — | Kendi | Kendi |
-| Operasyon yöneticisi | Gerekçeyle dinler | — | ✅ | ✅ |
-| Denetçi | — | — | — | Yalnız erişim kayıtları |
-| Finans, Veri yükleyici | — | — | — | — |
+## 7. Doğruluk ölçümü
 
-- Ses indirme (`recording.download`) varsayılan olarak hiç kimsede yoktur. Hukuki talep durumunda geçici olarak, iki onayla verilir.
-- Her dinleme AccessLog’a yazılır; günlük > 30 dinleme uyarı üretir.
+- İnsan düzeltmelerinden kelime hata oranı (WER) ve etiket düzeltme oranı aylık hesaplanır (docs/05 §ses).
+- Canlıya almadan önce 30–50 rol yapma kaydından oluşan Türkçe test setiyle WER ölçülür; PII maskeleme sızıntısı = 0 olmalıdır.
 
-## 5. Otomatik analizin kullanım kuralları
+## 8. Ses sağlayıcısı değerlendirme ölçütleri
 
-- Otomatik kalite skoru **destekleyici göstergedir**. Temsilcinin göreceği skor ekranında “otomatik değerlendirme — kesin değildir” uyarısı bulunur.
-- ASR güveni düşük çağrılar otomatik skora girmez.
-- Temsilci kendi değerlendirmesine **itiraz** edebilir; itiraz QA kuyruğuna düşer ve insan tarafından değerlendirilir.
-- Skor kartının her maddesi için otomatik ve insan değerlendirmesi arasındaki uyum (Cohen’s kappa) aylık ölçülür. Kappa < 0,6 olan madde otomatik puanlamadan çıkarılır.
-
-## 6. Sorumlu oyun bayrağı süreci
-
-1. Analiz, misafirin konuşmasında borç, kontrol kaybı, bırakma isteği, kendini sınırlama gibi ifadeler tespit eder.
-2. Bayrak yalnız `field.sensitive.rg` izinli kişilere görünür.
-3. Misafir için “sorumlu oyun incelemesi” açılır; inceleme kapanana kadar pazarlama araması ve mesajı **durur** (hizmet iletişimi devam edebilir).
-4. İnceleyen kişi sonuç girer: yanlış alarm / misafirle görüşüldü / iletişim kalıcı durduruldu / casinoya bilgi verildi (⚖️ HUKUK: casino ile paylaşım dayanağı).
-5. Bayrak ve sonuç misafir kartında yalnız yetkililere görünür.
-
-## 7. Skor kartı v1
-
-| # | Madde | Ağırlık | Kanıt yöntemi | Zaman koşulu |
-|---|---|---|---|---|
-| 1 | Selamlama | 5 | Örnek cümle benzerliği | İlk 15 sn |
-| 2 | Kendini ve şirketi tanıtma | 10 | Benzerlik + şirket adı geçmesi | İlk 30 sn |
-| 3 | Kayıt bildirimi teyidi (anons yoksa temsilci söyler) | 10 | Anons tespiti veya benzerlik | İlk 30 sn |
-| 4 | Arama amacını açıklama | 5 | Benzerlik | İlk 60 sn |
-| 5 | İletişim tercihini sorma/teyit | 5 | Benzerlik | — |
-| 6 | Ret talebine doğru yanıt (varsa) | **Kritik** | Opt-out tespiti + sonuç kodu = `DO_NOT_CONTACT` | — |
-| 7 | Kazanç vaadi / baskı dili yok | **Kritik** | Yasaklı ifade listesi | — |
-| 8 | Kapanış | 5 | Benzerlik | Son 30 sn |
-| İletişim | Konuşma oranı, söz kesme, sessizlik, monolog | 25 | Akustik metrikler | — |
-| Deneyim | Duygu eğrisi | 20 | Duygu modeli | — |
-| Kayıt doğruluğu | Sonuç kodu tutarlılığı, not | 15 | Karşılaştırma | — |
-
-Kritik maddelerden biri ihlal edilirse uyum bölümünün puanı 0 olur ve çağrı QA kuyruğuna gider.
+Bulut santral ve olası bulut ASR için: Türkçe tanıma başarısı · sesin işlendiği ve saklandığı ülke · alt işleyenler · silme güvencesi · modelin eğitiminde kullanım · erişim kayıtları · kesinti davranışı. **Varsayılan: ASR şirket içinde**, ses şirket dışına çıkmaz.
 
 ## Açık sorular
 
-1. Bulut santral seçildi mi? Stereo kayıt ve AB/TR’de barındırma destekliyor mu?
-2. Kayıt itirazında, itirazdan önceki kısım saklanmalı mı? ⚖️
-3. Skor kartı maddeleri ve ağırlıkları uygun mu?
-4. Sorumlu oyun incelemesinde casino ile bilgi paylaşımı yapılacak mı? ⚖️
-5. Analiz sunucusu (GPU) ne zaman temin edilebilir?
+1. Bulut santral seçildi mi? Stereo kayıt ve TR/AB barındırma destekliyor mu?
+2. Kayıt hukuki dayanağı ve çalışan aydınlatma metni ⚖️
+3. Saklama süreleri uygun mu? ⚖️
+4. Analiz sunucusu (GPU, 24 GB VRAM) ne zaman temin edilebilir? Yoksa CPU profilinde yalnız örneklem çağrılar transkript edilir.

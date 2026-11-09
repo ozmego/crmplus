@@ -20,11 +20,16 @@
     "queue": "Call queue",
     "guests": "Guests",
     "imports": "Imports",
+    "compare": "Compare",
     "review": "Review",
+    "calls": "Calls",
+    "messages": "Messages",
     "reports": "Reports",
     "finance": "Finance",
+    "hr": "People",
     "admin": "Admin",
-    "audit": "Audit"
+    "audit": "Audit",
+    "settings": "Settings"
   },
   "auth": {
     "eyebrow": "CRMPLUS · SECURE SIGN-IN",

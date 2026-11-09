@@ -1,4 +1,4 @@
-# 04 — İzin/Ret ve Arama Engelleme Akışı
+# 04 — İzin, Ret ve Kayıt Bilgilendirme Akışı
 
 Durum: **Taslak — hukuk teyidi bekliyor** · Sahibi: Uyum + hukuk
 
@@ -10,7 +10,7 @@ Durum: **Taslak — hukuk teyidi bekliyor** · Sahibi: Uyum + hukuk
 
 ## 2. İzin kaydı (kanal bazında)
 
-Kanallar: `CALL`, `SMS`, `WHATSAPP`, `EMAIL`.
+Kanallar: `CALL`, `SMS`, `WHATSAPP`, `EMAIL` ve `RECORDING` (görüşme kaydı tercihi; yalnız `DENIED` anlamlıdır — kayıt istemeyen misafirin sonraki çağrıları kayıtsız başlar, bkz. §2a ve docs/09 §3).
 
 | Alan | Açıklama |
 |---|---|
@@ -25,6 +25,13 @@ Kanallar: `CALL`, `SMS`, `WHATSAPP`, `EMAIL`.
 | `recordedBy` | Kaydı giren kullanıcı |
 
 Her değişiklik `ConsentHistory`’ye yazılır; eski kayıtlar silinmez.
+
+### 2a. Kayıt bilgilendirme ve tercih adımı
+
+1. Çağrı başında anons veya temsilci bildirimi yapılır; temsilci “Kayıt bildirimi yapıldı” işaretler.
+2. Misafir kayıt istemezse temsilci “Misafir kayıt istemiyor” seçer → o çağrının kaydı santralden gelse bile saklanmaz; `RECORDING = DENIED` zaman damgası ve çağrı referansıyla yazılır.
+3. Kayıt tercihi arama iznini **etkilemez**: misafir aranmaya devam edebilir, yalnız kayıtsız.
+4. Ses karar kapısı kapalıyken (docs/09 §2) hiçbir kayıt saklanmaz; bu adım yine işaretlenir.
 
 ## 3. Uygunluk fonksiyonu
 
@@ -61,6 +68,7 @@ Misafir hangi kanaldan (çağrı, SMS “RET”, WhatsApp, e-posta, casino arac�
    - Bekleyen geri aramalar `CANCELLED`.
 4. Metrik: **yansıma süresi** = `recordedAt − requestedAt`. Çağrı ve mesaj kanalında hedef: anlık (< 1 dk, sistem otomatik). Yazılı/casino aracılığıyla gelen taleplerde hedef: < 24 saat. ⚖️ HUKUK: Ret bildiriminin yasal işlenme süresi teyit edilmeli (Yönetmelikteki süre ve İYS’ye yansıtma yükümlülüğü).
 5. İYS kapsamındaki kanallarda ret, Aşama 2’de İYS’ye de bildirilir (Aşama 1’de İYS’ye bildirilecekler listesi raporu üretilir).
+6. SMS ile gelen `RET` (ve docs/10 §6 anahtar kelimeleri) sağlayıcı webhook’uyla **otomatik** işlenir: aynı numaraya sahip tüm misafirlerde SMS kanalı anında durdurulur.
 6. Durdurma kaydını kaldırmak: yalnız misafirin **yeni ve kanıtlı** izniyle, `block.remove` + ikinci onay + gerekçe.
 
 ## 5. İzin istisnası
@@ -93,6 +101,6 @@ Yabancı numaralı misafirlerde İYS kontrolü uygulanmaz, ancak CRM izin kural�
 
 1. İzin ve İYS süreçlerinin sahibi kim? (Kişi/ekip)
 2. Casinolar misafir izinlerini sizinle paylaşıyor mu? Paylaşıyorsa izin metni şirketinizi kapsıyor mu? ⚖️ HUKUK
-3. Sözlü izin (çağrı sırasında) kabul edilecek mi? Edilecekse kanıt olarak çağrı kaydı (Aşama 2) mı, temsilci beyanı mı yeterli?
+3. Sözlü izin (çağrı sırasında) kabul edilecek mi? Edilecekse kanıt olarak çağrı kaydı mı (karar kapısı açıksa), temsilci beyanı mı yeterli?
 4. İzin geçerlilik süresi tanımlı olmalı mı (ör. 2 yıl iletişim olmazsa yeniden izin)?
 5. Mevcut veritabanındaki misafirlerin izin durumu ne? İlk yüklemede büyük çoğunluk `UNKNOWN` olacaksa izin toplama planı gerekir.

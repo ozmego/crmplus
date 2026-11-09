@@ -4,10 +4,13 @@ import { can, requirePage } from "@/server/auth/rbac";
 import { getGuestCard } from "@/server/services/guests";
 import { ConsentBadge, PhoneStateBadge } from "@/components/badges";
 import { BlockForm, ConsentEditor, RevealPhone } from "@/components/guest-actions";
+import { FinanceForm } from "@/components/finance-form";
+import { db } from "@/server/db";
+import { sendSingleAction } from "@/app/(app)/messages/actions";
 
 export const dynamic = "force-dynamic";
 
-const CHANNEL_LABEL: Record<string, string> = { CALL: "Arama", SMS: "SMS", WHATSAPP: "WhatsApp", EMAIL: "E-posta", RECORDING: "Görüşme kaydı" };
+const CHANNEL_LABEL: Record<string, string> = { CALL: "Arama", SMS: "SMS", WHATSAPP: "WhatsApp", EMAIL: "E-posta", RECORDING: "Görüşme kaydı", VISIT: "Saha ziyareti", NOTE: "Not", IMPORT: "İçe aktarma" };
 const fmt = (d: Date | null | undefined) => (d ? d.toLocaleString("tr-TR", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Istanbul" }) : "—");
 
 export default async function GuestCardPage({ params }: { params: Promise<{ id: string }> }) {
@@ -18,6 +21,7 @@ export default async function GuestCardPage({ params }: { params: Promise<{ id: 
   const activeBlocks = g.blocks.filter((b) => !b.removedAt);
   const consentByChannel = new Map(g.consents.map((c) => [c.channel, c]));
   const canGrant = can(user, "consent.edit");
+  const smsTemplates = can(user, "message.send.single") ? await db.messageTemplate.findMany({ where: { status: "APPROVED", channel: "SMS" }, orderBy: { name: "asc" }, select: { id: true, name: true, category: true } }) : [];
 
   return (
     <div className="flex flex-col gap-6">
@@ -65,6 +69,15 @@ export default async function GuestCardPage({ params }: { params: Promise<{ id: 
           </ul>
           {g.externalIds.length > 0 && (
             <p className="mt-3 text-xs text-muted">Dış kimlikler: {g.externalIds.map((x) => `${x.source}: ${x.value}`).join(" · ")}</p>
+          )}
+          {smsTemplates.length > 0 && g.phones.length > 0 && (
+            <details className="mt-4">
+              <summary className="cursor-pointer text-sm font-semibold text-teal-ink">Şablonlu SMS gönder</summary>
+              <p className="mt-1 text-xs text-muted">SMS izni, durdurma kaydı ve İYS kontrolü gönderim anında yapılır.</p>
+              <div className="mt-2">
+                <FinanceForm action={sendSingleAction} submit="Gönder" inline fields={[{ name: "guestId", type: "hidden", value: g.id }, { name: "templateId", label: "Onaylı şablon", type: "select", required: true, options: smsTemplates.map((t) => ({ value: t.id, label: `${t.name} (${t.category === "MARKETING" ? "pazarlama" : "bilgilendirme"})` })) }]} />
+              </div>
+            </details>
           )}
         </section>
 

@@ -3,12 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-export function NavLinks({ items }: { items: { href: string; label: string }[] }) {
+export function NavLinks({ items, ariaLabel = "Ana menü" }: { items: { href: string; label: string; exact?: boolean }[]; ariaLabel?: string }) {
   const path = usePathname();
   return (
-    <nav aria-label="Ana menü" className="flex flex-wrap gap-1">
+    <nav aria-label={ariaLabel} className="flex flex-wrap gap-1">
       {items.map((i) => {
-        const active = path === i.href || path.startsWith(i.href + "/");
+        const active = path === i.href || (!i.exact && path.startsWith(i.href + "/"));
         return (
           <Link
             key={i.href}

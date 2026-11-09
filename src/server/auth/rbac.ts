@@ -123,3 +123,6 @@ export function userScopeWhere(p: Principal, perm: Permission): Prisma.UserWhere
   const teamIds = p.ledTeamIds.length ? p.ledTeamIds : p.teamId ? [p.teamId] : [];
   return { OR: [{ id: p.id }, { teamId: { in: teamIds } }] };
 }
+
+/** Arka plan işleri için: kullanıcının güncel yetkilerini (oturumsuz) yükler. Etkin değilse null. */
+export const principalFor = loadPrincipal;

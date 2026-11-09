@@ -130,6 +130,15 @@ export async function opsPanel(now = new Date()) {
   const reachedCodes = new Set(meta.filter((m) => m.category === "REACHED").map((m) => m.code));
   const noteReq = new Set(meta.filter((m) => m.noteRequired).map((m) => m.code));
 
+  // Ekip kapasitesi: yayınlanmış çizelgede bugün vardiyası olanlar ve şu an mesaide olanlar (plan vs gerçekleşen)
+  const todayDate = new Date(`${today}T00:00:00Z`);
+  const planned = await db.rosterAssignment.groupBy({ by: ["rosterId"], where: { date: todayDate, kind: "WORK", roster: { publishedAt: { not: null } } }, _count: true });
+  const rosterScope = new Map((await db.roster.findMany({ where: { id: { in: planned.map((p) => p.rosterId) } }, select: { id: true, scope: true } })).map((r) => [r.id, r.scope]));
+  const plannedByTeam = new Map<string, number>();
+  for (const p of planned) plannedByTeam.set(rosterScope.get(p.rosterId) ?? "", (plannedByTeam.get(rosterScope.get(p.rosterId) ?? "") ?? 0) + p._count);
+  const lastStatus = await db.agentStatusLog.findMany({ where: { at: { gte: new Date(`${today}T00:00:00+03:00`) } }, orderBy: { at: "desc" }, distinct: ["userId"], select: { userId: true, status: true } });
+  const onShift = new Set(lastStatus.filter((s) => s.status !== "OFFLINE").map((s) => s.userId));
+
   const teamRows = teams.map((t) => {
     const calls = t.members.flatMap((m) => m.calls);
     const openTasks = t.members.reduce((s, m) => s + m.tasks.length, 0);
@@ -138,6 +147,8 @@ export async function opsPanel(now = new Date()) {
     return {
       name: t.name,
       activeAgents: t.members.length,
+      plannedToday: plannedByTeam.get(t.id) ?? 0,
+      onShiftNow: t.members.filter((m) => onShift.has(m.id)).length,
       openTasks,
       tasksPerAgent: t.members.length ? openTasks / t.members.length : null,
       callsToday: calls.length,
@@ -166,6 +177,14 @@ export async function opsPanel(now = new Date()) {
   const missingDisp = calls30.filter((c) => c.autoClosed && !c.disposition).length;
   const missingNote = withNoteReq.filter((c) => c.noteLength < 10).length;
   const reflection = percentiles(blocks30.map((b) => Math.max(0, (b.recordedAt.getTime() - b.requestedAt.getTime()) / 1000)));
+  // Ses analizi kuyrukları (toplulaştırılmış; kişi bazlı içerik yalnız yetkili incelemede)
+  const [transcriptFailed, transcriptLow, analysisPending, analysisMismatch, recordingFailed] = await Promise.all([
+    db.transcript.count({ where: { status: "FAILED", createdAt: { gte: since30 } } }),
+    db.transcript.count({ where: { status: "LOW_CONFIDENCE", createdAt: { gte: since30 } } }),
+    db.callAnalysis.count({ where: { reviewStatus: "PENDING" } }),
+    db.callAnalysis.count({ where: { reviewStatus: "PENDING", dispositionMismatch: true } }),
+    db.recording.count({ where: { status: "FAILED", createdAt: { gte: since30 } } }),
+  ]);
   const exportDenied30 = await db.accessLog.count({ where: { action: "denied", at: { gte: since30 }, resource: { contains: "export" } } });
 
   return {
@@ -181,6 +200,7 @@ export async function opsPanel(now = new Date()) {
       review: Object.fromEntries(reviewOpen.map((r) => [r.kind, r._count])) as Record<string, number>,
       alertsOpen,
       denied24h,
+      speech: { transcriptFailed, transcriptLow, analysisPending, analysisMismatch, recordingFailed },
     },
     teams: teamRows,
     product: {
