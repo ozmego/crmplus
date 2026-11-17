@@ -1,5 +1,5 @@
 import "server-only";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import ExcelJS from "exceljs";
 import type { ImportPurpose, Prisma } from "@prisma/client";
 import { db } from "@/server/db";
@@ -202,7 +202,17 @@ export async function buildPreview(user: Principal, batchId: string) {
   const b = await loadBatch(batchId);
   if (!["MAPPED", "PREVIEWED"].includes(b.status)) throw new ImportError("BAD_STATUS");
   const mapping = b.mapping as Mapping;
+  // IMPORT_TRACE=1: aşama süreleri (performans ölçümü, docs/12)
+  const trace = process.env.IMPORT_TRACE === "1";
+  let t0 = performance.now();
+  const lap = (label: string) => {
+    if (!trace) return;
+    const t = performance.now();
+    console.log(`  [önizleme] ${label}: ${((t - t0) / 1000).toFixed(1)} sn`);
+    t0 = t;
+  };
   const parsed = await readRows(b);
+  lap("dosya okuma+ayrıştırma");
   const today = new Date();
 
   const stored: { rowNo: number; s: StoredRow }[] = parsed.rows.map((raw, i) => {
@@ -210,6 +220,7 @@ export async function buildPreview(user: Principal, batchId: string) {
     return { rowNo: (raw.__row as number) ?? i + 2, s: toStored(row, issues) };
   });
 
+  lap("normalizasyon");
   // Aday kayıtları toplu yükle
   const crmNos = [...new Set(stored.map((r) => r.s.crmNo).filter((n): n is number => n !== undefined))];
   const exts = stored.filter((r) => r.s.externalId && r.s.externalSource).map((r) => ({ source: r.s.externalSource!, value: r.s.externalId! }));
@@ -232,12 +243,17 @@ export async function buildPreview(user: Principal, batchId: string) {
     }
   }
   const byExt = new Map<string, string[]>();
-  for (const part of chunk(exts, 500)) {
-    const found = await db.guestExternalId.findMany({ where: { OR: part }, select: { source: true, value: true, guest: { select } } });
-    for (const f of found) {
-      guestsById.set(f.guest.id, f.guest);
-      const k = `${f.source}\u0000${f.value}`;
-      byExt.set(k, [...(byExt.get(k) ?? []), f.guest.id]);
+  // Kaynak bazında `value IN (...)`: (source, value) indeksini kullanır (çok sayıda OR çifti planlayıcıyı yavaşlatıyordu)
+  const valuesBySource = new Map<string, string[]>();
+  for (const e of exts) valuesBySource.set(e.source, [...(valuesBySource.get(e.source) ?? []), e.value]);
+  for (const [source, values] of valuesBySource) {
+    for (const part of chunk([...new Set(values)])) {
+      const found = await db.guestExternalId.findMany({ where: { source, value: { in: part } }, select: { source: true, value: true, guest: { select } } });
+      for (const f of found) {
+        guestsById.set(f.guest.id, f.guest);
+        const k = `${f.source}\u0000${f.value}`;
+        byExt.set(k, [...(byExt.get(k) ?? []), f.guest.id]);
+      }
     }
   }
   const byPhone = new Map<string, string[]>();
@@ -249,6 +265,7 @@ export async function buildPreview(user: Principal, batchId: string) {
     }
   }
 
+  lap("aday yükleme");
   const seen = new Set<string>();
   const results: { rowNo: number; result: RowResult; s: StoredRow; guestId?: string }[] = [];
   for (const { rowNo, s } of stored) {
@@ -315,6 +332,7 @@ export async function buildPreview(user: Principal, batchId: string) {
     results.push({ rowNo, result: hasConflict ? "CONFLICT" : hasChange ? "MATCHED" : "UNCHANGED", s, guestId: g.id });
   }
 
+  lap("eşleştirme");
   const count = (r: RowResult) => results.filter((x) => x.result === r).length;
   const summary = {
     rowCount: results.length,
@@ -338,7 +356,7 @@ export async function buildPreview(user: Principal, batchId: string) {
 
   await db.$transaction(async (tx) => {
     await tx.importRow.deleteMany({ where: { batchId: b.id } });
-    for (const part of chunk(results, 500)) {
+    for (const part of chunk(results, 2000)) {
       await tx.importRow.createMany({
         data: part.map((r) => ({
           batchId: b.id,
@@ -352,7 +370,8 @@ export async function buildPreview(user: Principal, batchId: string) {
       });
     }
     await tx.importBatch.update({ where: { id: b.id }, data: { status: "PREVIEWED", summary } });
-  }, { timeout: 120_000 });
+  }, { timeout: 120_000, maxWait: 30_000 });
+  lap("satırların yazılması");
   await audit({ actorId: user.id, action: "import.preview", entity: "ImportBatch", entityId: b.id, diff: summary });
   return summary;
 }
@@ -374,22 +393,31 @@ export async function setRowDecisions(user: Principal, batchId: string, rowNo: n
 export async function setAllDecisions(user: Principal, batchId: string, decision: Decision) {
   const b = await loadBatch(batchId);
   if (b.status !== "PREVIEWED") throw new ImportError("BAD_STATUS");
-  const rows = await db.importRow.findMany({ where: { batchId, result: "CONFLICT" } });
-  for (const row of rows) {
-    const s = row.normalized as unknown as StoredRow;
-    const d = Object.fromEntries((s.changes ?? []).filter((c) => c.action === "CONFLICT").map((c) => [c.field, decision]));
-    await db.importRow.update({ where: { id: row.id }, data: { decisions: d } });
-  }
-  await audit({ actorId: user.id, action: "import.bulk_decision", entity: "ImportBatch", entityId: batchId, diff: { decision, rows: rows.length } });
+  if (!["USE_NEW", "KEEP", "REVIEW"].includes(decision)) throw new ImportError("BAD_DECISION");
+  // Tek sorgu: her satırın çakışmalı alanları için aynı karar (500k satırda satır satır güncelleme dakikalar sürüyordu)
+  const rows = await db.$executeRaw`
+    UPDATE public."ImportRow" r
+    SET decisions = sub.d
+    FROM (
+      SELECT ir.id, jsonb_object_agg(c->>'field', to_jsonb(${decision}::text)) AS d
+      FROM public."ImportRow" ir, jsonb_array_elements(COALESCE(ir.normalized->'changes', '[]'::jsonb)) c
+      WHERE ir."batchId" = ${batchId} AND ir.result = 'CONFLICT' AND c->>'action' = 'CONFLICT'
+      GROUP BY ir.id
+    ) sub
+    WHERE r.id = sub.id`;
+  await audit({ actorId: user.id, action: "import.bulk_decision", entity: "ImportBatch", entityId: batchId, diff: { decision, rows } });
 }
 
+/** Kararı eksik çakışmalı satır sayısı (veritabanında hesaplanır; satırlar belleğe alınmaz). */
 export async function pendingDecisionCount(batchId: string) {
-  const rows = await db.importRow.findMany({ where: { batchId, result: "CONFLICT" }, select: { normalized: true, decisions: true } });
-  return rows.filter((r) => {
-    const s = r.normalized as unknown as StoredRow;
-    const d = (r.decisions as Record<string, Decision> | null) ?? {};
-    return (s.changes ?? []).some((c) => c.action === "CONFLICT" && !d[c.field]);
-  }).length;
+  const [r] = await db.$queryRaw<{ n: bigint }[]>`
+    SELECT count(*) AS n FROM public."ImportRow" r
+    WHERE r."batchId" = ${batchId} AND r.result = 'CONFLICT'
+      AND EXISTS (
+        SELECT 1 FROM jsonb_array_elements(COALESCE(r.normalized->'changes', '[]'::jsonb)) c
+        WHERE c->>'action' = 'CONFLICT' AND NOT (COALESCE(r.decisions, '{}'::jsonb) ? (c->>'field'))
+      )`;
+  return Number(r?.n ?? 0);
 }
 
 // ───────────────────────── 5. Uygulama ─────────────────────────
@@ -401,7 +429,6 @@ export async function applyImport(user: Principal, batchId: string) {
   if (b.status !== "PREVIEWED" && b.status !== "APPLYING") throw new ImportError("BAD_STATUS");
   if ((await pendingDecisionCount(batchId)) > 0) throw new ImportError("DECISIONS_PENDING");
 
-  const rows = await db.importRow.findMany({ where: { batchId, result: { in: ["NEW", "MATCHED", "CONFLICT", "POSSIBLE", "MULTI_MATCH"] } }, orderBy: { rowNo: "asc" } });
   const owners = new Map(
     (await db.user.findMany({ where: { status: "ACTIVE" }, select: { id: true, email: true } })).map((u) => [u.email.toLowerCase(), u.id]),
   );
@@ -409,6 +436,27 @@ export async function applyImport(user: Principal, batchId: string) {
   const source = `import:${b.id}`;
   const stats = { created: 0, updated: 0, review: 0, phonesAdded: 0, consents: 0 };
 
+  // 1) Yeni misafirler: toplu yazım (1.000'lik gruplar, kimlik sırasıyla sayfalanarak — bellekte tüm dosya tutulmaz)
+  let cursor: bigint | undefined;
+  for (;;) {
+    const part = await db.importRow.findMany({
+      where: { batchId, result: "NEW", ...(cursor ? { id: { gt: cursor } } : {}) },
+      orderBy: { id: "asc" },
+      take: 1000,
+      select: { id: true, normalized: true },
+    });
+    if (!part.length) break;
+    cursor = part[part.length - 1].id;
+    const r = await db.$transaction(
+      (tx) => createGuestsBatch(tx, part.map((x) => ({ id: x.id, s: x.normalized as unknown as StoredRow })), { actorId: user.id, source, owners, label: "İçe aktarma: " + b.fileName, refId: b.id }),
+      { timeout: 120_000, maxWait: 30_000 },
+    );
+    stats.created += r.created;
+    stats.consents += r.consents;
+  }
+
+  // 2) Eşleşen, çakışan ve incelemeye düşen satırlar: alan bazında karar gerektiği için satır satır
+  const rows = await db.importRow.findMany({ where: { batchId, result: { in: ["MATCHED", "CONFLICT", "POSSIBLE", "MULTI_MATCH"] } }, orderBy: { rowNo: "asc" } });
   for (let i = 0; i < rows.length; i += 100) {
     const part = rows.slice(i, i + 100);
     await db.$transaction(async (tx) => {
@@ -431,15 +479,6 @@ export async function applyImport(user: Principal, batchId: string) {
           });
           stats.review++;
           await tx.importRow.update({ where: { id: row.id }, data: { applied: { review: true } } });
-          continue;
-        }
-
-        if (row.result === "NEW") {
-          const g = await createGuestFromRow(tx, s, { actorId: user.id, source, ownerId: s.ownerAgent ? owners.get(s.ownerAgent) : undefined, label: "İçe aktarma: " + b.fileName, refId: b.id });
-          stats.consents += g.consents;
-          applied.createdGuestId = g.id;
-          stats.created++;
-          await tx.importRow.update({ where: { id: row.id }, data: { applied: applied as Prisma.InputJsonValue, guestId: g.id } });
           continue;
         }
 
@@ -509,13 +548,83 @@ export async function applyImport(user: Principal, batchId: string) {
           data: { applied: { guestId, fields: changedFields, phonesAdded, consents: consentsApplied } as Prisma.InputJsonValue },
         });
       }
-    }, { timeout: 120_000 });
+    }, { timeout: 120_000, maxWait: 30_000 });
   }
 
   const summary = { ...((b.summary as object) ?? {}), applied: stats, job: null, jobError: null };
   await db.importBatch.update({ where: { id: b.id }, data: { status: "APPLIED", appliedAt: now, summary } });
   await audit({ actorId: user.id, action: "import.apply", entity: "ImportBatch", entityId: b.id, diff: stats });
   return stats;
+}
+
+/**
+ * Toplu yeni misafir oluşturma (performans: 500k satır hedefi). createGuestFromRow ile aynı verileri üretir,
+ * ancak her tabloya tek `createMany` ile yazar; kimlikler önceden üretilir. İçe aktarma satırları tek SQL ile güncellenir.
+ */
+async function createGuestsBatch(
+  tx: Prisma.TransactionClient,
+  rows: { id: bigint; s: StoredRow }[],
+  ctx: { actorId: string; source: string; owners: Map<string, string>; label: string; refId: string },
+) {
+  const now = new Date();
+  const guests: Prisma.GuestCreateManyInput[] = [];
+  const phones: Prisma.GuestPhoneCreateManyInput[] = [];
+  const emails: Prisma.GuestEmailCreateManyInput[] = [];
+  const exts: Prisma.GuestExternalIdCreateManyInput[] = [];
+  const notes: Prisma.GuestNoteCreateManyInput[] = [];
+  const consents: Prisma.ConsentRecordCreateManyInput[] = [];
+  const histories: Prisma.ConsentHistoryCreateManyInput[] = [];
+  const interactions: Prisma.InteractionCreateManyInput[] = [];
+  const applied: { id: bigint; guestId: string }[] = [];
+  let consentCount = 0;
+  for (const { id, s } of rows) {
+    const gid = `g${randomUUID().replace(/-/g, "").slice(0, 24)}`;
+    guests.push({
+      id: gid,
+      firstName: s.fields.firstName ?? "",
+      lastName: s.fields.lastName ?? "",
+      language: s.fields.language ?? "tr",
+      country: s.fields.country,
+      city: s.fields.city,
+      birthYear: s.fields.birthYear ? Number(s.fields.birthYear) : undefined,
+      vipLevel: s.fields.vipLevel,
+      tags: s.tags ?? [],
+      ownerId: s.ownerAgent ? ctx.owners.get(s.ownerAgent) : undefined,
+      fieldSources: Object.fromEntries(Object.keys(s.fields).map((f) => [f, { source: ctx.source, at: now.toISOString() }])),
+    });
+    s.phones.filter((p) => p.ok && p.e164Enc).forEach((p, idx) =>
+      phones.push({ guestId: gid, e164Enc: p.e164Enc!, phoneHash: p.hash!, masked: p.masked!, country: p.country, lineType: p.lineType, isPrimary: idx === 0, formatStatus: p.countryMismatch ? "COUNTRY_MISMATCH" : "VALID", lastCheckedAt: now }),
+    );
+    if (s.email) emails.push({ guestId: gid, emailEnc: s.email.enc, emailHash: s.email.hash, masked: s.email.masked, isPrimary: true });
+    if (s.externalId && s.externalSource) exts.push({ guestId: gid, source: s.externalSource, value: s.externalId });
+    if (s.notesEnc) notes.push({ guestId: gid, bodyEnc: s.notesEnc, authorId: ctx.actorId });
+    for (const [ch, st] of Object.entries(s.consent)) {
+      if (!st || st === "UNKNOWN") continue;
+      consents.push({
+        guestId: gid, channel: ch as "CALL", status: st, source: s.consentSource, sourceSystem: ctx.source, proofRef: s.consentProofRef,
+        grantedAt: st === "GRANTED" ? new Date(s.consentDate!) : null, deniedAt: st === "DENIED" ? (s.consentDate ? new Date(s.consentDate) : now) : null, updatedBy: ctx.actorId,
+      });
+      histories.push({ guestId: gid, channel: ch, oldStatus: null, newStatus: st, source: ctx.source, actorId: ctx.actorId });
+      consentCount++;
+    }
+    interactions.push({ guestId: gid, channel: "IMPORT", summary: ctx.label, actorId: ctx.actorId, refId: ctx.refId });
+    applied.push({ id, guestId: gid });
+  }
+  await tx.guest.createMany({ data: guests });
+  if (phones.length) await tx.guestPhone.createMany({ data: phones });
+  if (emails.length) await tx.guestEmail.createMany({ data: emails });
+  if (exts.length) await tx.guestExternalId.createMany({ data: exts });
+  if (notes.length) await tx.guestNote.createMany({ data: notes });
+  if (consents.length) await tx.consentRecord.createMany({ data: consents });
+  if (histories.length) await tx.consentHistory.createMany({ data: histories });
+  await tx.interaction.createMany({ data: interactions });
+  // İçe aktarma satırları: tek sorguda guestId + applied
+  await tx.$executeRaw`
+    UPDATE public."ImportRow" AS r
+    SET "guestId" = v.gid, applied = jsonb_build_object('createdGuestId', v.gid)
+    FROM unnest(${applied.map((a) => a.id)}::bigint[], ${applied.map((a) => a.guestId)}::text[]) AS v(id, gid)
+    WHERE r.id = v.id`;
+  return { created: guests.length, consents: consentCount };
 }
 
 /** İçe aktarılan (normalize, şifreli) satırdan yeni misafir oluşturur. İçe aktarma ve inceleme kuyruğu ortak kullanır. */

@@ -31,7 +31,8 @@ RUN pnpm exec prisma generate \
 
 # ─── Uygulama ───
 FROM base AS app
-ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0 STORAGE_DIR=/app/storage
+# Bellek: büyük içe aktarmaların önizleme/uygulaması işçide çalışır; uygulama yalnız yükleme ve ayrıştırma yapar (docs/12 §2)
+ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0 STORAGE_DIR=/app/storage NODE_OPTIONS=--max-old-space-size=2048
 COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
 COPY --from=build --chown=node:node /app/public ./public
@@ -45,7 +46,8 @@ CMD ["node", "server.js"]
 
 # ─── İşçi ve araçlar ───
 FROM build AS worker
-ENV NODE_ENV=production STORAGE_DIR=/app/storage
+# 500k satır önizlemede ölçülen tepe bellek ~1,8 GB (scripts/perf); pay bırakılır
+ENV NODE_ENV=production STORAGE_DIR=/app/storage NODE_OPTIONS=--max-old-space-size=6144
 RUN mkdir -p /app/storage && chown -R node:node /app/storage /app/.next
 USER node
 ENTRYPOINT ["/usr/bin/tini", "--"]

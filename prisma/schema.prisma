@@ -52,6 +52,7 @@ model User {
   callbacks     Callback[]        @relation("CallbackAssignee")
   statusLogs    AgentStatusLog[]
 
+  @@index([teamId])
   @@schema("public")
 }
 
@@ -97,6 +98,7 @@ model UserRole {
   role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@id([userId, roleId])
+  @@index([roleId])
   @@schema("public")
 }
 
@@ -124,6 +126,7 @@ model MfaRecoveryCode {
   codeHash String
   usedAt   DateTime?
 
+  @@index([userId])
   @@schema("public")
 }
 
@@ -309,6 +312,7 @@ model GuestEmail {
   isPrimary Boolean @default(false)
 
   @@index([emailHash])
+  @@index([guestId])
   @@schema("public")
 }
 
@@ -320,6 +324,7 @@ model GuestExternalId {
   value   String
 
   @@unique([source, value])
+  @@index([guestId])
   @@schema("public")
 }
 
@@ -331,6 +336,7 @@ model GuestNote {
   bodyEnc   String
   createdAt DateTime @default(now())
 
+  @@index([guestId])
   @@schema("public")
 }
 
@@ -639,6 +645,7 @@ model Task {
 
   @@index([assigneeId, status])
   @@index([guestId])
+  @@index([campaignId])
   @@schema("public")
 }
 
@@ -683,6 +690,7 @@ model Call {
   @@unique([provider, externalId])
   @@index([agentId, startedAt])
   @@index([guestId, startedAt])
+  @@index([taskId])
   @@schema("public")
 }
 
@@ -700,6 +708,7 @@ model Callback {
   createdAt    DateTime  @default(now())
 
   @@index([assigneeId, scheduledAt])
+  @@index([guestId])
   @@schema("public")
 }
 
@@ -811,6 +820,7 @@ model TranscriptEdit {
   editorId     String
   at           DateTime   @default(now())
 
+  @@index([transcriptId])
   @@schema("public")
 }
 
@@ -848,6 +858,7 @@ model AnalysisReview {
   comment    String?
   at         DateTime     @default(now())
 
+  @@index([analysisId])
   @@schema("public")
 }
 
@@ -986,6 +997,7 @@ model Contract {
   versions  ContractVersion[]
   createdAt DateTime          @default(now())
 
+  @@index([casinoId])
   @@schema("finance")
 }
 
@@ -1018,6 +1030,7 @@ model Trip {
   createdAt DateTime    @default(now())
   guests    TripGuest[]
 
+  @@index([casinoId])
   @@schema("finance")
 }
 
@@ -1053,6 +1066,7 @@ model GamingResult {
   enteredAt   DateTime         @default(now())
 
   @@index([periodId])
+  @@index([tripGuestId])
   @@schema("finance")
 }
 
@@ -1098,6 +1112,7 @@ model CommissionCalculation {
   createdAt        DateTime               @default(now())
   adjustments      CommissionAdjustment[]
 
+  @@index([periodId])
   @@schema("finance")
 }
 
@@ -1119,6 +1134,8 @@ model CommissionAdjustment {
   approvedAt    DateTime?
   createdAt     DateTime              @default(now())
 
+  @@index([calculationId])
+  @@index([periodId])
   @@schema("finance")
 }
 
@@ -1427,6 +1444,7 @@ model QaReview {
   coachingNote  String
   at            DateTime      @default(now())
 
+  @@index([sampleId])
   @@schema("public")
 }
 

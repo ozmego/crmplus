@@ -5,11 +5,16 @@ import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:
  * Biçim: "v1:<iv b64>:<tag b64>:<ciphertext b64>" — anahtar sürümü önekte tutulur, rotasyon için.
  */
 
+// Anahtarlar her çağrıda yeniden çözülmez (toplu içe aktarmada yüz binlerce çağrı); ortam değişirse önbellek yenilenir
+const keyCache = new Map<string, { raw: string; buf: Buffer }>();
 function key(name: "FIELD_ENCRYPTION_KEY" | "BLIND_INDEX_KEY"): Buffer {
   const raw = process.env[name];
   if (!raw) throw new Error(`${name} tanımlı değil`);
+  const hit = keyCache.get(name);
+  if (hit && hit.raw === raw) return hit.buf;
   const buf = Buffer.from(raw, "base64");
   if (buf.length !== 32) throw new Error(`${name} 32 bayt olmalı`);
+  keyCache.set(name, { raw, buf });
   return buf;
 }
 
