@@ -28,12 +28,15 @@ export function FinanceForm({
   const [, startTransition] = useTransition();
   const ref = useRef<HTMLFormElement>(null);
   // Hata durumunda girilen değerler korunur (React'in otomatik form sıfırlaması yerine), başarıda temizlenir.
+  // `action` sayfa etkileşime hazır olmadan yapılan gönderimde de sunucu eylemini çalıştırır (yoksa tarayıcı
+  // formu düz GET olarak gönderir ve işlem kaybolur); hazır olduktan sonra onSubmit devralır.
   useEffect(() => {
     if (state?.ok) ref.current?.reset();
   }, [state]);
   return (
     <form
       ref={ref}
+      action={act}
       onSubmit={(e) => {
         e.preventDefault();
         const fd = new FormData(e.currentTarget);

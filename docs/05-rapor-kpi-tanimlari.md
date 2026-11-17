@@ -100,9 +100,14 @@ Kaynak = import batch veya kaynak tipi (casino X, web formu…).
 | Transkript sorunları | Son 30 gün: `Transcript` `FAILED` + `Recording` `FAILED` + `Transcript` `LOW_CONFIDENCE` (güven < 0,6) |
 | İnsan incelemesi bekleyen | `CallAnalysis.reviewStatus = PENDING`; alt satır: bunlardan sonuç/özet uyuşmazlığı olanlar |
 
+## 7b. Canlı kanal panosu ve kapasite planı (Aşama 2)
+
+- **Canlı pano** (`/ops/live`, 10 sn yenileme, `report.product`): temsilci durum sayıları (son durum, bugün), açık çağrı, bugünkü deneme ve konuşma süresi, saatlik deneme grafiği, bekleyen görev, sonraki saatin geri aramaları, geciken geri aramalar, son 1 saatin santral olayları; SMS ve WhatsApp için bugünkü gönderim durumları, gelen mesaj ve ret sayıları, açık/okunmamış/atanmamış konuşma, pencere açık konuşma, ret şüphesi. Yalnız sayılar; misafir adı veya temsilci sıralaması yok.
+- **Kapasite planı** (`/ops/capacity`): son *n* haftanın (vars. 4) aynı gün+saatteki ortalama çağrı denemesi × ortalama işlem süresi (çalma + konuşma + en fazla 10 dk çağrı sonrası) / hedef doluluk (vars. %80) → saatlik gereken temsilci. Yayınlanmış çizelgedeki çağrı merkezi vardiyalarıyla karşılaştırılır; fark negatifse eksik. Otomatik kapanan çağrılar hariç. Erlang-C kullanılmaz (dış arama ağırlıklı çalışmada gelen kuyruk varsayımı geçerli değil). Öneri niteliğindedir.
+
 ## 7a. Ses analizi raporları (tanımlar)
 
-Uygulama durumu: operasyon panelindeki iki kart (yukarıda) ve `/calls` filtreleri hazır; aşağıdaki göstergelerin ayrı rapor ekranı Aşama 2 analiz doğruluk paneliyle gelir.
+Uygulama durumu: operasyon panelindeki iki kart, `/calls` filtreleri ve **Raporlar → Ses analizi doğruluk paneli** (`/reports/speech`, `report.product` yetkisi) hazır; aşağıdaki tüm göstergeler bu ekranda tarih aralığıyla hesaplanır.
 
 Genel panolarda yalnız **toplulaştırılmış** gösterilir; kişi bazlı içerik yalnız `/calls` yetkili inceleme ekranında. Hiçbiri personel sıralaması veya puanı için kullanılmaz.
 

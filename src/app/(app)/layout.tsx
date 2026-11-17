@@ -13,13 +13,18 @@ const NAV: { href: string; key: string; perm: Permission }[] = [
   { href: "/compare", key: "compare", perm: "compare.run" },
   { href: "/review", key: "review", perm: "review.view" },
   { href: "/calls", key: "calls", perm: "call.view" },
+  { href: "/qa", key: "qa", perm: "qa.review" },
+  { href: "/qa", key: "qa", perm: "qa.respond" },
   { href: "/messages", key: "messages", perm: "message.campaign.prepare" },
+  { href: "/inbox", key: "inbox", perm: "inbox.view" },
   { href: "/reports", key: "reports", perm: "report.view" },
   { href: "/finance", key: "finance", perm: "finance.view" },
   { href: "/hr", key: "hr", perm: "attendance.view" },
   { href: "/admin/users", key: "admin", perm: "user.view" },
   { href: "/admin/audit", key: "audit", perm: "audit.view" },
   { href: "/admin/settings", key: "settings", perm: "settings.manage" },
+  { href: "/admin/vocabulary", key: "vocabulary", perm: "vocabulary.manage" },
+  { href: "/admin/integrations", key: "integrations", perm: "integration.manage" },
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -27,7 +32,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const t = await getTranslations("nav");
   const tc = await getTranslations("common");
   const locale = await getLocale();
-  const items = NAV.filter((n) => can(user, n.perm)).map((n) => ({ href: n.href, label: t(n.key as "ops") }));
+  const items = NAV.filter((n, i) => can(user, n.perm) && NAV.findIndex((m) => m.href === n.href && can(user, m.perm)) === i).map((n) => ({ href: n.href, label: t(n.key as "ops") }));
 
   return (
     <div className="flex min-h-screen flex-col">

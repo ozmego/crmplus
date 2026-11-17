@@ -1,5 +1,9 @@
 import Link from "next/link";
-import { requirePage } from "@/server/auth/rbac";
+import { can, requirePage } from "@/server/auth/rbac";
+import { engineSettings } from "@/server/services/finance-engine";
+import { FinanceForm } from "@/components/finance-form";
+import { engineModeAction } from "./actions";
+import { StatementUpload } from "@/components/statement-upload";
 import { db } from "@/server/db";
 import { financeView } from "@/server/services/finance";
 
@@ -24,6 +28,10 @@ export default async function FinanceHome() {
   });
   const sums = await db.gamingResult.groupBy({ by: ["periodId"], where: { periodId: { in: periods.map((p) => p.id) } }, _sum: { netLoss: true } });
   const net = new Map(sums.map((s) => [s.periodId, s._sum.netLoss]));
+  const { mode } = await engineSettings();
+  const casinos = await db.casino.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } });
+  const statements = await db.casinoStatement.findMany({ orderBy: { uploadedAt: "desc" }, take: 10 });
+  const casinoName = new Map(casinos.map((x) => [x.id, x.name]));
 
   return (
     <div className="flex flex-col gap-4">
@@ -32,6 +40,25 @@ export default async function FinanceHome() {
         <h1 className="page-title">Komisyon dönemleri</h1>
         <p className="mt-1 text-sm text-muted">Dönem, bir casino için bir aydır. Oyun sonucu girildiğinde ilgili dönem kendiliğinden açılır.</p>
       </div>
+      <section className="card flex flex-wrap items-center justify-between gap-3" data-testid="engine-mode">
+        <p className="text-sm">
+          Komisyon motoru: <b>{mode === "SHADOW" ? "Gölge mod" : "Birincil"}</b> — {mode === "SHADOW" ? "tutar elle girilir, motor sonucu yanında gösterilir ve fark onayda gerekçe ister." : "tutar boş bırakılırsa motor sonucu kullanılır."} Birincil moda geçiş, gölge moddaki hesapların motorla uyumu doğrulandıktan sonra yapılmalıdır.
+        </p>
+        {can(user, "finance.calc.approve") && (
+          <FinanceForm action={engineModeAction} submit={mode === "SHADOW" ? "Birincil moda geç" : "Gölge moda dön"} tone="secondary" inline fields={[{ name: "mode", type: "hidden", value: mode === "SHADOW" ? "PRIMARY" : "SHADOW" }, { name: "reason", label: "Gerekçe", required: true }]} />
+        )}
+      </section>
+      {can(user, "finance.result.edit") && casinos.length > 0 && (
+        <details className="card">
+          <summary className="cursor-pointer card-title">Casino ekstresi yükle</summary>
+          <div className="mt-3"><StatementUpload casinos={casinos} /></div>
+          {statements.length > 0 && (
+            <ul className="mt-3 text-sm" data-testid="recent-statements">
+              {statements.map((s) => <li key={s.id}><Link href={`/finance/statements/${s.id}`} className="text-teal-ink underline">{s.fileName}</Link> · {casinoName.get(s.casinoId)} · {s.period} · {s.status === "APPLIED" ? "işlendi" : "yüklendi"}</li>)}
+            </ul>
+          )}
+        </details>
+      )}
       <div className="overflow-x-auto rounded-lg border border-line">
         <table className="table-ink min-w-[900px]">
           <thead>

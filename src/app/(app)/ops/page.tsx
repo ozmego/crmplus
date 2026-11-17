@@ -36,7 +36,7 @@ export default async function OpsPage() {
       <div>
         <p className="eyebrow">OPERASYON</p>
         <h1 className="page-title">Operasyon paneli</h1>
-        <p className="mt-1 text-sm text-muted">Bugün · tüm ekipler · İstanbul saati. Formüller: docs/05.</p>
+        <p className="mt-1 text-sm text-muted">Bugün · tüm ekipler · İstanbul saati. Formüller: docs/05. · <Link href="/ops/live" className="font-semibold text-teal-ink underline">Canlı kanal panosu</Link> · <Link href="/ops/capacity" className="font-semibold text-teal-ink underline">Kapasite planı</Link></p>
       </div>
 
       <section aria-label="Bekleyen işler" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">

@@ -83,7 +83,7 @@ Bazı durumlarda iznin olmadığı ama iletişimin gerekli olduğu düşünüleb
 ## 6. İYS
 
 - Aşama 1: İYS’den alınan izin/ret listeleri dosya olarak içe aktarılır (`sourceSystem = IYS`). İYS kaydı ile CRM kaydı çelişirse **İYS’deki ret kazanır**; İYS’deki onay, CRM’deki ret’i ezmez (inceleme kuyruğu).
-- Aşama 2: Sağlayıcı İYS API’si ile gönderim öncesi sorgu ve ret bildirimi.
+- Aşama 2 (adaptör uygulandı): `IYS_PROVIDER = none | http | mock`. Gönderim öncesi Türkiye numarası için `MESAJ` türünde sorgu yapılır; yanıt alınamazsa ileti gönderilmez. Sorgular `IysQueryLog`'a yazılır (ONAY/RET 1 saat önbellek). Durdurma kaydında Türkiye numaraları için ret bildirimi `IysOutbox` kuyruğuna girer (SMS/WhatsApp → MESAJ, arama → ARAMA); işçi 15 dakikada bir gönderir, bağlantı yokken liste **Yönetim → Entegrasyonlar** ekranında bekler. Gerçek bağlantı, SMS sağlayıcısının İYS arayüzü veya bir İYS entegratörü seçilince yalnız ayarla açılır.
 - ⚖️ HUKUK: Şirketin İYS’ye kayıtlı “hizmet sağlayıcı” olması gerekip gerekmediği, sesli arama kanalının İYS kapsamı ve misafirlerin tacir/esnaf ayrımı teyit edilmeli.
 - İYS sorumlusu: (Açık soru 1)
 

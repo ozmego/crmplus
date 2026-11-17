@@ -921,7 +921,10 @@ model Message {
   segments          Int       @default(1)
   provider          String
   providerMessageId String?
-  status            String // QUEUED | SENT | DELIVERED | FAILED | SKIPPED | RECEIVED
+  status            String // QUEUED | SENT | DELIVERED | READ | FAILED | SKIPPED | RECEIVED
+  conversationId    String? // WhatsApp ortak gelen kutusu
+  waTemplateId      String?
+  readAt            DateTime?
   error             String?
   sentById          String?
   isTest            Boolean   @default(false)
@@ -1025,6 +1028,7 @@ model TripGuest {
   guestId   String // public.Guest.id (ilişki tanımlanmaz)
   crmNo     Int
   guestName String // eklendiği anki ad (anlık görüntü)
+  country   String? // eklendiği anki ülke (ülke bazlı kurallar için anlık görüntü)
   results   GamingResult[]
 
   @@unique([tripId, guestId])
@@ -1069,26 +1073,30 @@ model CommissionPeriod {
 }
 
 model CommissionCalculation {
-  id           String                 @id @default(cuid())
-  periodId     String
-  period       CommissionPeriod       @relation(fields: [periodId], references: [id])
-  version      Int                    @default(1)
-  status       String                 @default("DRAFT") // DRAFT | IN_REVIEW | APPROVED | RECONCILED | CANCELLED
-  amount       Decimal                @db.Decimal(18, 2)
-  currency     String
-  snapshot     Json // kullanılan sözleşme sürümü ve kurallar, girdi sonuçları ve toplamlar, hesap notu
-  note         String?
-  preparedBy   String
-  submittedAt  DateTime?
-  approvedBy   String?
-  approvedAt   DateTime?
-  rejectReason String?
-  statementRef String?
-  reconciledBy String?
-  reconciledAt DateTime?
-  cancelReason String?
-  createdAt    DateTime               @default(now())
-  adjustments  CommissionAdjustment[]
+  id               String                 @id @default(cuid())
+  periodId         String
+  period           CommissionPeriod       @relation(fields: [periodId], references: [id])
+  version          Int                    @default(1)
+  status           String                 @default("DRAFT") // DRAFT | IN_REVIEW | APPROVED | RECONCILED | CANCELLED
+  amount           Decimal                @db.Decimal(18, 2)
+  currency         String
+  snapshot         Json // kullanılan sözleşme sürümü ve kurallar, girdi sonuçları ve toplamlar, hesap notu
+  note             String?
+  preparedBy       String
+  submittedAt      DateTime?
+  approvedBy       String?
+  approvedAt       DateTime?
+  rejectReason     String?
+  statementRef     String?
+  method           String                 @default("MANUAL") // MANUAL | ENGINE (Aşama 3: motor sonucu kabul edildi)
+  engineAmount     Decimal?               @db.Decimal(18, 2) // gölge mod: aynı anda hesaplanan motor tutarı
+  statementId      String?
+  reconcileSummary Json? // ekstre ↔ girilen sonuç ↔ hesap farkları
+  reconciledBy     String?
+  reconciledAt     DateTime?
+  cancelReason     String?
+  createdAt        DateTime               @default(now())
+  adjustments      CommissionAdjustment[]
 
   @@schema("finance")
 }
@@ -1348,4 +1356,207 @@ model TimesheetPeriod {
 
   @@unique([month, scope])
   @@schema("hr")
+}
+
+// ───────────────────────── Aşama 2: kurum sözlüğü ve kalite örneklemesi ─────────────────────────
+
+/**
+ * Türkçe kurum sözlüğü: transkriptte casino/otel/kişi adlarının doğru tanınması için ilk istem.
+ */
+model VocabularyTerm {
+  id        String   @id @default(cuid())
+  term      String   @unique
+  kind      String // CASINO | HOTEL | PERSON | PLACE | OTHER
+  active    Boolean  @default(true)
+  createdBy String
+  createdAt DateTime @default(now())
+
+  @@schema("public")
+}
+
+/**
+ * Ortak kriter seti (sürümlü). Kriterler yalnız “karşılandı / karşılanmadı / uygulanmaz” alır; puan yoktur.
+ */
+model QaCriteriaSet {
+  id        String     @id @default(cuid())
+  name      String
+  version   Int
+  criteria  Json // [{key, label, description}]
+  active    Boolean    @default(true)
+  createdBy String
+  createdAt DateTime   @default(now())
+  reviews   QaReview[]
+
+  @@unique([name, version])
+  @@schema("public")
+}
+
+/**
+ * Kalite örneklemi: rastgele örneklem + analizin önerdiği adaylar (süreç uyarısı, uyuşmazlık, düşük güven).
+ * Örneklem puan, sıralama veya yaptırım üretmez; koçluk içindir ve personelin açıklama/itiraz hakkı vardır.
+ */
+model QaSample {
+  id               String     @id @default(cuid())
+  callId           String     @unique
+  agentId          String
+  teamId           String?
+  reason           String // RANDOM | PROCESS_FLAG | MISMATCH | LOW_CONFIDENCE | MANUAL
+  weekStart        DateTime   @db.Date
+  status           String     @default("OPEN") // OPEN | REVIEWED | ACKNOWLEDGED | DISPUTED | CLOSED
+  agentComment     String?
+  agentRespondedAt DateTime?
+  resolution       String?
+  closedBy         String?
+  closedAt         DateTime?
+  createdAt        DateTime   @default(now())
+  reviews          QaReview[]
+
+  @@index([teamId, status])
+  @@index([agentId, status])
+  @@schema("public")
+}
+
+model QaReview {
+  id            String        @id @default(cuid())
+  sampleId      String
+  sample        QaSample      @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+  criteriaSetId String
+  criteriaSet   QaCriteriaSet @relation(fields: [criteriaSetId], references: [id])
+  reviewerId    String
+  results       Json // [{key, result: MET | NOT_MET | NA, note?}]
+  coachingNote  String
+  at            DateTime      @default(now())
+
+  @@schema("public")
+}
+
+// ───────────────────────── Aşama 2: WhatsApp Business (resmi API) ─────────────────────────
+// Kişisel hesap otomasyonu yoktur. Pencere dışında yalnız Meta'da onaylı şablon gönderilir (docs/10).
+
+/**
+ * Onaylı şablon kataloğu: kategori, dil, sürüm, Meta onay durumu. Sürüm değişikliği yeni kayıttır.
+ */
+model WaTemplate {
+  id                 String    @id @default(cuid())
+  name               String // Meta şablon adı (küçük harf, alt çizgi)
+  language           String    @default("tr")
+  category           String // MARKETING | UTILITY
+  body               String // {{1}} {{2}} … Meta biçimi; değişken anlamları `variables`
+  variables          String[]  @default([]) // ör. ["ad", "temsilci_adi"] — beyaz liste
+  optOutButton       Boolean   @default(false) // pazarlamada “Aboneliği iptal et” hızlı yanıtı zorunlu
+  version            Int       @default(1)
+  metaStatus         String    @default("DRAFT") // DRAFT | PENDING | APPROVED | REJECTED | PAUSED
+  internalApprovedBy String?
+  createdBy          String
+  createdAt          DateTime  @default(now())
+  statusAt           DateTime?
+
+  @@unique([name, language, version])
+  @@schema("public")
+}
+
+/**
+ * Ortak gelen kutusu konuşması: numara (blind index) başına bir açık konuşma; atama ve kapanış.
+ */
+model Conversation {
+  id             String    @id @default(cuid())
+  channel        String    @default("WHATSAPP")
+  phoneHash      String
+  phoneEnc       String
+  guestId        String?
+  assigneeId     String?
+  teamId         String?
+  status         String    @default("OPEN") // OPEN | CLOSED
+  lastInboundAt  DateTime?
+  lastOutboundAt DateTime?
+  unread         Int       @default(0)
+  optOutSuspect  Boolean   @default(false) // belirsiz ret ifadesi → en üste
+  createdAt      DateTime  @default(now())
+  closedAt       DateTime?
+
+  @@index([status, assigneeId])
+  @@index([phoneHash])
+  @@schema("public")
+}
+
+// ───────────────────────── Aşama 2: İYS ─────────────────────────
+
+/**
+ * İYS sorgu izi: hangi numara, hangi tür, hangi sonuç, hangi kaynak (docs/04 §6). Sonuç kısa süre önbelleklenir.
+ */
+model IysQueryLog {
+  id        String   @id @default(cuid())
+  phoneHash String
+  type      String // MESAJ | ARAMA
+  result    String // ONAY | RET | UNAVAILABLE
+  source    String // none | http | mock
+  at        DateTime @default(now())
+
+  @@index([phoneHash, type, at])
+  @@schema("public")
+}
+
+/**
+ * İYS'ye bildirilecek retler: durdurma kaydında TR numaraları için kuyruğa girer, işçi gönderir.
+ */
+model IysOutbox {
+  id        String    @id @default(cuid())
+  phoneHash String
+  phoneEnc  String
+  type      String // MESAJ | ARAMA
+  guestId   String
+  blockId   String
+  status    String    @default("PENDING") // PENDING | SENT | FAILED
+  attempts  Int       @default(0)
+  error     String?
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+
+  @@index([status, createdAt])
+  @@schema("public")
+}
+
+// ───────────────────────── Aşama 3: casino ekstresi ve mutabakat ─────────────────────────
+
+/**
+ * Casino ekstresi: kaynak dosya şifreli saklanır, özeti (SHA-256) değişmezliği kanıtlar.
+ */
+model CasinoStatement {
+  id         String          @id @default(cuid())
+  casinoId   String
+  period     String // "2026-11"
+  fileName   String
+  sha256     String
+  storageKey String?
+  currency   String
+  status     String          @default("IMPORTED") // IMPORTED | APPLIED | SUPERSEDED
+  totals     Json // {netLoss, rolling, lines, matched, unmatched}
+  uploadedBy String
+  uploadedAt DateTime        @default(now())
+  appliedBy  String?
+  appliedAt  DateTime?
+  lines      StatementLine[]
+
+  @@index([casinoId, period])
+  @@schema("finance")
+}
+
+model StatementLine {
+  id          String          @id @default(cuid())
+  statementId String
+  statement   CasinoStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  rowNo       Int
+  crmNo       Int?
+  playerRef   String? // casino oyuncu no
+  name        String?
+  playedOn    DateTime?
+  netLoss     Decimal         @db.Decimal(18, 2)
+  rolling     Decimal?        @db.Decimal(18, 2)
+  tripGuestId String?
+  match       String // MATCHED | UNMATCHED | NOT_IN_TRIP | INVALID
+  issue       String?
+  resultId    String? // uygulandıysa oluşan GamingResult
+
+  @@index([statementId])
+  @@schema("finance")
 }

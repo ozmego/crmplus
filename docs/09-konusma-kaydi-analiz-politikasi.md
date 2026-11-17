@@ -69,9 +69,17 @@ Düşük güvenli (< 0,6) transkriptler ve sonuç/özet uyuşmazlıkları incele
 
 Saklama temizliği her gece 03:15 (Europe/Istanbul) çalışır. Aşama 1'de otomatik silinenler: ses ve ham transkript. Maskelenmiş transkript ve analiz önerisinin 1 yıl sonunda silinmesi Aşama 2'de otomatikleşecek; o zamana kadar `retention.execute` yetkisiyle elle yürütülür.
 
+## 6a. Kalite örneklemesi (Aşama 2 — uygulandı)
+
+- **Örneklem:** her Pazartesi 07:00'de geçen hafta için, temsilci başına 3 görüşme (en az 30 sn). En fazla 2'si analizin önerdiği aday (sonuç/özet uyuşmazlığı, süreç uyarısı, düşük güven), kalanı rastgele. Seçim tekrarlanabilir (hafta + temsilci tohumlu) ve denetim kaydına yazılır. Lider ayrıca elle görüşme ekleyebilir.
+- **İnceleme:** takım lideri sürümlü ortak kriter setiyle her kriteri “karşılandı / karşılanmadı / uygulanmaz” olarak işaretler; “karşılanmadı” için açıklama zorunludur. Koçluk notu zorunludur. **Toplam puan hesaplanmaz ve gösterilmez.**
+- **Personel hakkı:** personel yalnız incelenmiş örneklemini görür; “okudum” der veya gerekçeyle itiraz eder. İtiraz lider tarafından gerekçeli yanıtla kapatılır.
+- **Sınırlar:** örneklem sonuçları puantajla, personel sıralamasıyla veya yaptırımla birleştirilmez; raporlarda yalnız durum sayıları toplulaştırılmış görünür.
+- **Kurum sözlüğü:** etkin terimler (en fazla 200) transkript motoruna ilk istem olarak verilir. Altı veya daha fazla rakam içeren terim (telefon, kimlik, kart) reddedilir.
+
 ## 7. Doğruluk ölçümü
 
-- İnsan düzeltmelerinden kelime hata oranı (WER) ve etiket düzeltme oranı aylık hesaplanır (docs/05 §ses).
+- İnsan düzeltmelerinden kelime hata oranı (WER) ve etiket düzeltme oranı **Raporlar → Ses analizi doğruluk paneli** ekranında seçilen dönem için hesaplanır (docs/05 §7a). WER yalnız düzeltilen bölütlerden hesaplanır; düzeltilmemiş bölütler doğru varsayılmaz.
 - Canlıya almadan önce 30–50 rol yapma kaydından oluşan Türkçe test setiyle WER ölçülür; PII maskeleme sızıntısı = 0 olmalıdır.
 
 ## 8. Ses sağlayıcısı değerlendirme ölçütleri

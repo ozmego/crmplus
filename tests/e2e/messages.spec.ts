@@ -63,10 +63,11 @@ test("SMS: şablon kuralları → iki kişili onay → izin/İYS hariç tutma �
   // Hazırlayan: kampanya taslağı, segment = etiket
   await page.goto("/messages");
   await page.getByLabel("Kampanya adı").fill(`E2E kampanya ${s}`);
-  await page.getByLabel("Onaylı şablon").selectOption({ label: `Kasım gezisi ${s} (pazarlama)` });
+  await page.getByLabel("Onaylı şablon").selectOption({ label: `SMS · Kasım gezisi ${s} (pazarlama)` });
   await page.getByLabel("Etiket").fill(tag);
   await page.getByRole("button", { name: "Taslağı oluştur ve önizle" }).click();
-  await expect(page).toHaveURL(/\/messages\/campaigns\//);
+  // Geliştirme sunucusunda kampanya sayfasının ilk derlemesi 30 sn'yi bulabilir
+  await expect(page).toHaveURL(/\/messages\/campaigns\//, { timeout: 60_000 });
   const campaignUrl = page.url();
   await expect(page.getByTestId("eligible-count")).toHaveText("1");
   await expect(page.getByText(/İYS bağlantısı yok.*: 1/)).toBeVisible();
@@ -113,7 +114,7 @@ test("SMS: şablon kuralları → iki kişili onay → izin/İYS hariç tutma �
   // Önizleme yenilenince durdurulan misafir artık uygun değil
   await page.goto("/messages");
   await page.getByLabel("Kampanya adı").fill(`E2E kampanya 2 ${s}`);
-  await page.getByLabel("Onaylı şablon").selectOption({ label: `Kasım gezisi ${s} (pazarlama)` });
+  await page.getByLabel("Onaylı şablon").selectOption({ label: `SMS · Kasım gezisi ${s} (pazarlama)` });
   await page.getByLabel("Etiket").fill(tag);
   await page.getByRole("button", { name: "Taslağı oluştur ve önizle" }).click();
   await expect(page.getByTestId("eligible-count")).toHaveText("0");

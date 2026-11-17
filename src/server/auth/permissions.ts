@@ -49,11 +49,16 @@ export const PERMISSIONS = {
   "transcript.edit": "Transkript düzeltme",
   "analysis.review": "Analiz önerisi inceleme/onay",
   "qa.review": "Kalite örneklemesi",
+  "qa.respond": "Kendi kalite incelemesine açıklama/itiraz",
+  "vocabulary.manage": "Türkçe kurum sözlüğü",
   // Mesajlaşma
   "message.send.single": "Tekil şablon mesaj",
   "message.campaign.prepare": "Mesaj kampanyası hazırlama",
   "message.campaign.approve": "Mesaj kampanyası onaylama",
   "message.template.manage": "Mesaj şablonları",
+  "inbox.view": "WhatsApp gelen kutusu",
+  "phone.check": "Telefon hat durumu sorgusu (dış servis)",
+  "message.reply": "WhatsApp 24 saat penceresinde serbest yanıt",
   // Rapor ve dışa aktarma
   "report.view": "Raporlar",
   "report.product": "Ürün ve veri kalitesi metrikleri",
@@ -125,7 +130,7 @@ export const DEFAULT_ROLES: RoleDef[] = [
     grants: [
       "user.view", "user.manage", "role.manage", "role.assign", "team.manage",
       "settings.manage", "integration.manage", "audit.view", "alert.view", "alert.resolve",
-      "emergency.access", "block.create", ["roster.view", "own"], ["attendance.view", "own"], ["leave.request", "own"],
+      "emergency.access", "block.create", "vocabulary.manage", ["roster.view", "own"], ["attendance.view", "own"], ["leave.request", "own"],
     ],
   },
   {
@@ -142,6 +147,7 @@ export const DEFAULT_ROLES: RoleDef[] = [
       "message.campaign.prepare", "message.campaign.approve", "message.template.manage",
       "report.view", "report.product", "export.basic", "export.bulk", "team.manage", "alert.view", "user.view",
       "hr.employee.view", "roster.view", "roster.manage", "roster.publish", "route.manage", "attendance.view", ["leave.request", "own"],
+      "vocabulary.manage", "inbox.view", "phone.check",
     ],
   },
   {
@@ -155,7 +161,7 @@ export const DEFAULT_ROLES: RoleDef[] = [
       "task.view", "task.create", "task.assign", "campaign.view", "recording.listen", "transcript.view",
       "transcript.edit", "analysis.review", "qa.review", "message.send.single", "report.view", "export.basic",
       "hr.employee.view", "roster.view", "roster.manage", "roster.publish", "route.manage", "attendance.view", "attendance.adjust",
-      "leave.preapprove", "timesheet.prepare", ["leave.request", "own"],
+      "leave.preapprove", "timesheet.prepare", ["leave.request", "own"], "inbox.view", "message.reply", "phone.check",
     ],
   },
   {
@@ -167,6 +173,7 @@ export const DEFAULT_ROLES: RoleDef[] = [
       "guest.view", "guest.edit", "field.notes", "consent.view", "block.create", "queue.view", "call.make",
       "call.view", "callback.manage", "task.view", "transcript.view", "transcript.edit", "analysis.review",
       "message.send.single", "report.view", ["roster.view", "own"], ["attendance.view", "own"], ["leave.request", "own"],
+      "qa.respond", "inbox.view", "message.reply",
     ],
   },
   {
@@ -177,7 +184,7 @@ export const DEFAULT_ROLES: RoleDef[] = [
     grants: [
       "guest.view", "consent.view", "consent.edit", "block.create", "import.create", "import.apply", "import.rollback", "import.view",
       "compare.run", "review.view", "review.resolve", "mapping.template.manage", "export.basic",
-      ["report.view", "own"], ["roster.view", "own"], ["attendance.view", "own"], ["leave.request", "own"],
+      "phone.check", ["report.view", "own"], ["roster.view", "own"], ["attendance.view", "own"], ["leave.request", "own"],
     ],
   },
   {

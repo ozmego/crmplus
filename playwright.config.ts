@@ -10,6 +10,8 @@ export default defineConfig({
   globalSetup: "./tests/e2e/global-setup.ts",
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3210",
+    // Bulunamayan düğmede test süresince beklemek yerine hızlı ve anlaşılır hata
+    actionTimeout: 30_000,
     channel: "chrome",
     headless: true,
     locale: "tr-TR",

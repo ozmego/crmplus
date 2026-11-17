@@ -14,6 +14,20 @@ Durum: **Taslak — hukuk teyidi bekliyor** · Sahibi: Uyum + pazarlama
 - Her gönderim misafirin iletişim zaman çizelgesine (`Interaction`, kanal = SMS) düşer; mesaj gövdeleri şifreli saklanır.
 - **İYS bağlantısı Aşama 2'de.** O zamana kadar Türkiye numaralarına kampanya ve tekil SMS **gönderilmez** (hariç tutma nedeni: “İYS bağlantısı yok”). “İzinli varsay” davranışı yoktur.
 
+## 0a. Aşama 2'de uygulanan (WhatsApp Business)
+
+- **Kanal kapısı:** KVKK yurt dışı aktarım değerlendirmesi (tarih, onaylayan, belge referansı) Sistem yöneticisi tarafından girilmeden kanal kapalıdır; şablon onayı ve gönderim reddedilir.
+- **Sağlayıcı:** resmi Cloud API (`WA_PROVIDER = meta-cloud`); geliştirmede `mock`. Kişisel hesap otomasyonu yoktur.
+- **Şablon kataloğu:** ad (Meta kuralı), dil, kategori (UTILITY/MARKETING), sürüm, `{{n}}` yer tutucuları beyaz listedeki değişkenlere eşlenir; finansal değişken reddedilir; pazarlamada “Aboneliği iptal et” düğmesi zorunlu. Hazırlayan ≠ onaylayan; iç onaydan sonra Meta onayına gider, durum webhook'la güncellenir.
+- **Gönderim:** misafir kartından onaylı şablonla; WhatsApp kanal izni, durdurma ve telefon kontrolü; Türkiye numarasında İYS (bağlı değilken gönderilmez).
+- **24 saat penceresi:** misafirin son mesajından sonraki 24 saat serbest yanıt (`message.reply`); dışında yalnız şablon.
+- **Ortak gelen kutusu:** numara başına açık konuşma; atama (bana ata/bırak), kapatma; kapsam: personel kendine atanan + ekibinin atanmamışları, lider ekibi, operasyon tümü. Numara birden fazla misafirle eşleşirse konuşma misafire bağlanmaz.
+- **Ret:** “Aboneliği iptal et” düğmesi veya ret kelimesi → anında WhatsApp durdurma + tek seferlik onay metni; belirsiz ifade → “ret şüphesi” işaretiyle en üstte, temsilci tek tıkla durdurur.
+- **Durumlar:** gönderildi / teslim edildi / okundu / başarısız (geç gelen eski durum yenisini geri almaz). “WhatsApp'ta kayıtlı değil” yalnız bu kanal için uygunsuzluktur.
+- **Webhook:** `/api/messaging/whatsapp` — GET abonelik doğrulaması (`WA_VERIFY_TOKEN`), POST `X-Hub-Signature-256` (`WA_APP_SECRET`); aynı mesaj kimliği iki kez işlenmez.
+- **Toplu kampanya:** SMS ile aynı akış ve kapılar (segment beyaz listesi, önizleme ve maliyet, test gönderimi, iki kişili onay + hukuk teyidi, hız sınırı `WA_TPS`, her mesajda yeniden uygunluk, kanal bazında 24 saat sıklık sınırı). Yalnız Meta onaylı şablonla; şablon gönderim sırasında onayını kaybederse kampanya durur. Gönderilen her mesaj misafirin temsilcisine atanmış bir konuşma açar, yanıtlar gelen kutusuna düşer.
+- Henüz yok: medya mesajları ve ClamAV taraması.
+
 ## 1. Kanallar
 
 | Kanal | Sağlayıcı (öneri) | Gönderici |

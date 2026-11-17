@@ -4,6 +4,8 @@ import { db } from "@/server/db";
 import type { Principal } from "@/server/auth/rbac";
 import { audit, logAccess } from "@/server/audit";
 import { canLockPeriod, checkTransition, contractVersionSchema, nextPeriod, periodOf, type CalcAction, type CalcStatus, type ContractVersionInput } from "@/lib/finance";
+import { fromKurus, shadowDiff, toKurus } from "@/lib/commission";
+import { engineForPeriod, engineSettings } from "@/server/services/finance-engine";
 
 /**
  * Finans modülü — docs/06 (Aşama 1: kayıt + onay; otomatik hesap Aşama 3).
@@ -80,9 +82,9 @@ export async function createTrip(user: Principal, input: { casinoId: string; nam
 
 export async function addTripGuest(user: Principal, tripId: string, crmNo: number) {
   // Finans yalnız ad ve CRM no görür (docs/01 dipnot 2)
-  const g = await db.guest.findUnique({ where: { crmNo }, select: { id: true, crmNo: true, firstName: true, lastName: true, anonymizedAt: true } });
+  const g = await db.guest.findUnique({ where: { crmNo }, select: { id: true, crmNo: true, firstName: true, lastName: true, anonymizedAt: true, country: true } });
   if (!g || g.anonymizedAt) throw new FinanceError("GUEST_NOT_FOUND");
-  const tg = await db.tripGuest.create({ data: { tripId, guestId: g.id, crmNo: g.crmNo, guestName: `${g.firstName} ${g.lastName}` } }).catch((e) => {
+  const tg = await db.tripGuest.create({ data: { tripId, guestId: g.id, crmNo: g.crmNo, guestName: `${g.firstName} ${g.lastName}`, country: g.country } }).catch((e) => {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") throw new FinanceError("ALREADY_IN_TRIP");
     throw e;
   });
@@ -129,8 +131,11 @@ export async function periodTotals(periodId: string) {
   };
 }
 
-/** Hesaplama taslağı: tutar elle girilir; geçerli sözleşme sürümü ve girdiler değiştirilemez anlık görüntü olarak saklanır. */
-export async function createCalculation(user: Principal, input: { periodId: string; amount: string; note: string }) {
+/**
+ * Hesaplama taslağı (Aşama 3): motor her zaman çalışır ve sonucu anlık görüntüye yazılır.
+ * Gölge modda tutar elle girilir (motor yanında gösterilir); birincil modda tutar boşsa motor sonucu kullanılır.
+ */
+export async function createCalculation(user: Principal, input: { periodId: string; amount?: string; note: string }) {
   const p = await db.commissionPeriod.findUniqueOrThrow({ where: { id: input.periodId }, include: { casino: true } });
   if (p.status === "LOCKED") throw new FinanceError("PERIOD_LOCKED");
   const [y, m] = p.period.split("-").map(Number);
@@ -147,17 +152,28 @@ export async function createCalculation(user: Principal, input: { periodId: stri
     select: { id: true, netLoss: true, rolling: true, playedOn: true, source: true, sourceRef: true, enteredAt: true, tripGuest: { select: { crmNo: true, guestName: true, tripId: true } } },
   });
   const totals = await periodTotals(p.id);
+  const engine = await engineForPeriod(p.id);
+  const { mode } = await engineSettings();
+  const manual = input.amount?.trim();
+  if (!manual && mode === "SHADOW") throw new FinanceError("AMOUNT_REQUIRED_SHADOW");
+  const engineAmount = fromKurus(engine.total);
+  const amount = manual || engineAmount;
   const prev = await db.commissionCalculation.count({ where: { periodId: p.id } });
   const calc = await db.commissionCalculation.create({
     data: {
       periodId: p.id,
       version: prev + 1,
-      amount: D(input.amount),
+      amount: D(amount),
+      engineAmount: D(engineAmount),
+      method: manual ? "MANUAL" : "ENGINE",
       currency: p.casino.currency,
       note: input.note,
       preparedBy: user.id,
       snapshot: {
-        method: "MANUAL", // Aşama 1: tutar elle girildi
+        method: manual ? "MANUAL" : "ENGINE",
+        engineMode: mode,
+        engine: { ...engine, total: engine.total } as unknown,
+        shadow: shadowDiff(toKurus(amount), engine.total),
         contracts: versions.map((v) => ({ contract: v.contract.name, versionId: v.id, version: v.version, combine: v.combine, rules: v.rules, validFrom: v.validFrom, validTo: v.validTo })),
         totals: { netLoss: totals.netLoss.toString(), rolling: totals.rolling.toString(), guests: totals.guests, trips: totals.trips, results: totals.results },
         inputs: results.map((r) => ({ id: r.id, crmNo: r.tripGuest.crmNo, trip: r.tripGuest.tripId, playedOn: r.playedOn, netLoss: r.netLoss.toString(), rolling: r.rolling?.toString() ?? null, source: r.source, sourceRef: r.sourceRef, enteredAt: r.enteredAt })),
@@ -165,7 +181,7 @@ export async function createCalculation(user: Principal, input: { periodId: stri
       } as unknown as Prisma.InputJsonValue,
     },
   });
-  await audit({ actorId: user.id, action: "finance.calc.create", entity: "CommissionCalculation", entityId: calc.id, diff: { periodId: p.id, amount: input.amount, version: calc.version } });
+  await audit({ actorId: user.id, action: "finance.calc.create", entity: "CommissionCalculation", entityId: calc.id, diff: { periodId: p.id, amount, engineAmount, method: manual ? "MANUAL" : "ENGINE", version: calc.version } });
   return calc;
 }
 
@@ -175,13 +191,16 @@ export async function transitionCalculation(user: Principal, calcId: string, act
     actorId: user.id, periodLocked: calc.period.status === "LOCKED", reason: extra.reason, statementRef: extra.statementRef,
   });
   if (!r.ok) throw new FinanceError(r.error);
+  // Gölge mod kontrolü (yetki ve iki kişili onaydan sonra): elle girilen tutar motordan farklıysa onay gerekçe ister
+  if (action === "APPROVE" && calc.engineAmount && !calc.amount.equals(calc.engineAmount) && (extra.reason ?? "").trim().length < 5) throw new FinanceError("DIFF_REASON_REQUIRED");
   const now = new Date();
   await db.commissionCalculation.update({
     where: { id: calc.id },
     data: {
       status: r.to,
       ...(action === "SUBMIT" ? { submittedAt: now, rejectReason: null } : {}),
-      ...(action === "APPROVE" ? { approvedBy: user.id, approvedAt: now } : {}),
+      ...(action === "APPROVE" ? { approvedBy: user.id, approvedAt: now, ...(extra.reason ? { note: `${calc.note ?? ""}
+[Onay notu] ${extra.reason}`.trim() } : {}) } : {}),
       ...(action === "REJECT" ? { rejectReason: extra.reason } : {}),
       ...(action === "RECONCILE" ? { statementRef: extra.statementRef, reconciledBy: user.id, reconciledAt: now } : {}),
       ...(action === "CANCEL" ? { cancelReason: extra.reason } : {}),

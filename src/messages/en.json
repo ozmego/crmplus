@@ -24,9 +24,13 @@
     "review": "Review",
     "calls": "Calls",
     "messages": "Messages",
+    "inbox": "Inbox",
     "reports": "Reports",
     "finance": "Finance",
     "hr": "People",
+    "qa": "Quality",
+    "vocabulary": "Vocabulary",
+    "integrations": "Integrations",
     "admin": "Admin",
     "audit": "Audit",
     "settings": "Settings"

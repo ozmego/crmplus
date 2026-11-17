@@ -12,6 +12,9 @@ import { checkEligibility, INELIGIBLE_LABEL_TR, type IneligibleReason } from "@/
 import { checkTemplate, isOptOut, renderTemplate, segmentSchema, smsSegments, withOptOut, type Segment } from "@/lib/sms";
 export { segmentSchema };
 import { normalizePhone } from "@/lib/phone";
+import { renderWaTemplate } from "@/lib/whatsapp";
+import { waProvider } from "@/server/messaging/whatsapp";
+import { openConversation, waEnabled } from "@/server/services/whatsapp";
 
 /**
  * SMS — Aşama 1 (docs/10): şablon, kanal bazlı izin kontrolü, kontrollü kampanya taslağı, iki kişili onay,
@@ -70,28 +73,36 @@ export async function approveTemplate(user: Principal, id: string) {
 interface Recipient {
   guestId: string;
   phoneId: string;
+  phoneHash: string;
   e164: string;
+  ownerId: string | null;
+  teamId: string | null;
   values: { ad: string; soyad: string; sehir: string; temsilci_adi: string };
 }
 
-/** Kampanya alıcıları: SMS izni, durdurma, hat türü, İYS, sıklık sınırı (docs/10 §3). Her gönderimde yeniden çağrılır. */
-export async function evaluateRecipients(category: Category, where: Prisma.GuestWhereInput, limit = 50_000) {
+export type MsgChannel = "SMS" | "WHATSAPP";
+
+/**
+ * Kampanya alıcıları: kanal izni, durdurma, hat türü, İYS, kanal bazında sıklık sınırı (docs/10 §3).
+ * Her gönderimde yeniden çağrılır.
+ */
+export async function evaluateRecipients(category: Category, where: Prisma.GuestWhereInput, limit = 50_000, channel: MsgChannel = "SMS") {
   const now = new Date();
   const guests = await db.guest.findMany({
     where,
     take: limit,
     select: {
-      id: true, firstName: true, lastName: true, city: true, anonymizedAt: true,
-      owner: { select: { name: true } },
+      id: true, firstName: true, lastName: true, city: true, anonymizedAt: true, ownerId: true,
+      owner: { select: { name: true, teamId: true } },
       phones: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
-      consents: { where: { channel: "SMS" } },
+      consents: { where: { channel } },
       blocks: { where: { removedAt: null } },
     },
   });
   const recentMarketing = new Set(
     category === "MARKETING"
       ? (await db.message.findMany({
-          where: { direction: "OUT", isTest: false, createdAt: { gte: new Date(now.getTime() - 86_400_000) }, campaignId: { not: null }, status: { in: ["SENT", "DELIVERED"] } },
+          where: { channel, direction: "OUT", isTest: false, createdAt: { gte: new Date(now.getTime() - 86_400_000) }, campaignId: { not: null }, status: { in: ["SENT", "DELIVERED", "READ"] } },
           select: { guestId: true },
         })).map((m) => m.guestId)
       : [],
@@ -109,7 +120,7 @@ export async function evaluateRecipients(category: Category, where: Prisma.Guest
     let chosen: (typeof g.phones)[number] | null = null;
     for (const ph of g.phones) {
       const r = checkEligibility({
-        channel: "SMS", purpose: category === "MARKETING" ? "MARKETING" : "SERVICE", now, guest: g, consent: g.consents[0] ?? null, blocks: g.blocks,
+        channel, purpose: category === "MARKETING" ? "MARKETING" : "SERVICE", now, guest: g, consent: g.consents[0] ?? null, blocks: g.blocks,
         phone: { formatStatus: ph.formatStatus, ownership: ph.ownership, reachability: ph.reachability, lineType: ph.lineType },
       });
       if (r.ok) {
@@ -124,7 +135,7 @@ export async function evaluateRecipients(category: Category, where: Prisma.Guest
     }
     // Bilgilendirme muafiyeti hukuk teyidine kadar uygulanmaz: her iki kategori de İYS'den geçer (docs/10 §2)
     if (chosen.country === "TR") {
-      const iys = await iysCheck(chosen.phoneHash);
+      const iys = await iysCheck(decrypt(chosen.e164Enc), "MESAJ");
       if (iys === "UNAVAILABLE") {
         exclude("IYS_UNAVAILABLE");
         continue;
@@ -141,45 +152,97 @@ export async function evaluateRecipients(category: Category, where: Prisma.Guest
     eligible.push({
       guestId: g.id,
       phoneId: chosen.id,
+      phoneHash: chosen.phoneHash,
       e164: decrypt(chosen.e164Enc),
+      ownerId: g.ownerId,
+      teamId: g.owner?.teamId ?? null,
       values: { ad: g.firstName, soyad: g.lastName, sehir: g.city ?? "", temsilci_adi: g.owner?.name ?? "" },
     });
   }
   return { total: guests.length, eligible, excluded };
 }
 
-// ───────────── Kampanya ─────────────
+// ───────────── Kampanya (SMS ve WhatsApp) ─────────────
 
-async function estimateFor(category: Category, segment: Segment, templateBody: string) {
-  const { total, eligible, excluded } = await evaluateRecipients(category, segmentWhere(segment));
-  const sample = eligible.slice(0, 5).map((r) => withOptOut(renderTemplate(templateBody, r.values), category, optOutText()));
-  const seg = sample.length ? Math.max(...sample.map((s) => smsSegments(s).segments)) : smsSegments(withOptOut(templateBody, category, optOutText())).segments;
-  const unitCost = Number(process.env.SMS_UNIT_COST ?? 0.2);
+/**
+ * Kanal içeriği: şablonu yükler, metni üretir ve gönderir. SMS: onaylı SMS şablonu + ret metni + parça hesabı.
+ * WhatsApp: Meta'da onaylı şablon (pencere dışı tek yol); yanıtlar ortak gelen kutusuna düşsün diye konuşma açılır.
+ */
+async function channelContent(channel: MsgChannel, templateId: string, category: Category) {
+  if (channel === "WHATSAPP") {
+    if (!(await waEnabled())) throw new MessagingError("CHANNEL_DISABLED");
+    const t = await db.waTemplate.findUnique({ where: { id: templateId } });
+    if (!t) throw new MessagingError("TEMPLATE_NOT_APPROVED");
+    const tplCategory: Category = t.category === "MARKETING" ? "MARKETING" : "INFORMATIONAL";
+    return {
+      approved: t.metaStatus === "APPROVED",
+      category: tplCategory,
+      body: t.body,
+      render: (v: Recipient["values"]) => renderWaTemplate(t.body, t.variables, v),
+      segments: () => 1,
+      unitCost: Number(process.env.WA_UNIT_COST ?? 0.6),
+      templateRef: { waTemplateId: t.id },
+      send: async (to: string, v: Recipient["values"]) => {
+        const p = waProvider();
+        const r = await p.sendTemplate({ to, name: t.name, language: t.language, params: t.variables.map((x) => (v as Record<string, string>)[x] ?? "") });
+        return { provider: p.name, id: r.id };
+      },
+    };
+  }
+  const t = await db.messageTemplate.findUnique({ where: { id: templateId } });
+  if (!t) throw new MessagingError("TEMPLATE_NOT_APPROVED");
+  const render = (v: Recipient["values"]) => withOptOut(renderTemplate(t.body, v), category, optOutText());
+  return {
+    approved: t.status === "APPROVED",
+    category: t.category as Category,
+    body: t.body,
+    render,
+    segments: (text: string) => smsSegments(text).segments,
+    unitCost: Number(process.env.SMS_UNIT_COST ?? 0.2),
+    templateRef: { templateId: t.id },
+    send: async (to: string, v: Recipient["values"], ref: string) => {
+      const r = await smsProvider().send({ to, text: render(v), reference: ref });
+      return { provider: r.provider, id: r.providerMessageId };
+    },
+  };
+}
+type Content = Awaited<ReturnType<typeof channelContent>>;
+const channelOf = (c: { channel: string }) => (c.channel === "WHATSAPP" ? "WHATSAPP" : "SMS") as MsgChannel;
+
+async function estimateFor(channel: MsgChannel, category: Category, segment: Segment, content: Content) {
+  const { total, eligible, excluded } = await evaluateRecipients(category, segmentWhere(segment), 50_000, channel);
+  const sample = eligible.slice(0, 5).map((r) => content.render(r.values));
+  const seg = sample.length ? Math.max(...sample.map((s) => content.segments(s))) : content.segments(content.body);
   return {
     total, eligible: eligible.length, excluded, segmentsPerMessage: seg,
-    estimatedCost: Number((eligible.length * seg * unitCost).toFixed(2)), unitCost,
+    estimatedCost: Number((eligible.length * seg * content.unitCost).toFixed(2)), unitCost: content.unitCost,
     preview: sample.map((s) => s.replace(/\d{6,}/g, "•••")),
     computedAt: new Date().toISOString(),
   };
 }
 
-export async function createCampaign(user: Principal, input: { name: string; category: Category; templateId: string; segment: Segment }) {
-  const tpl = await db.messageTemplate.findUniqueOrThrow({ where: { id: input.templateId } });
-  if (tpl.status !== "APPROVED") throw new MessagingError("TEMPLATE_NOT_APPROVED");
-  if (tpl.category !== input.category) throw new MessagingError("CATEGORY_MISMATCH");
+export async function createCampaign(user: Principal, input: { name: string; category: Category; templateId: string; segment: Segment; channel?: MsgChannel }) {
+  const channel = input.channel ?? "SMS";
+  const content = await channelContent(channel, input.templateId, input.category);
+  if (!content.approved) throw new MessagingError("TEMPLATE_NOT_APPROVED");
+  if (content.category !== input.category) throw new MessagingError("CATEGORY_MISMATCH");
   const segment = segmentSchema.parse(input.segment);
-  const estimate = await estimateFor(input.category, segment, tpl.body);
+  const estimate = await estimateFor(channel, input.category, segment, content);
   const c = await db.messageCampaign.create({
-    data: { name: input.name.trim(), category: input.category, templateId: tpl.id, segment, estimate: estimate as unknown as Prisma.InputJsonValue, preparedBy: user.id },
+    data: { name: input.name.trim(), channel, category: input.category, templateId: input.templateId, segment, estimate: estimate as unknown as Prisma.InputJsonValue, preparedBy: user.id },
   });
-  await audit({ actorId: user.id, action: "message.campaign.create", entity: "MessageCampaign", entityId: c.id, diff: { segment, eligible: estimate.eligible } });
+  await audit({ actorId: user.id, action: "message.campaign.create", entity: "MessageCampaign", entityId: c.id, diff: { channel, segment, eligible: estimate.eligible } });
   return c;
+}
+
+export async function campaignTemplateBody(c: { channel: string; templateId: string; category: string }) {
+  return (await channelContent(channelOf(c), c.templateId, c.category as Category)).body;
 }
 
 export async function refreshEstimate(id: string) {
   const c = await db.messageCampaign.findUniqueOrThrow({ where: { id } });
-  const tpl = await db.messageTemplate.findUniqueOrThrow({ where: { id: c.templateId } });
-  const estimate = await estimateFor(c.category as Category, c.segment as Segment, tpl.body);
+  const content = await channelContent(channelOf(c), c.templateId, c.category as Category);
+  const estimate = await estimateFor(channelOf(c), c.category as Category, c.segment as Segment, content);
   await db.messageCampaign.update({ where: { id }, data: { estimate: estimate as unknown as Prisma.InputJsonValue } });
   return estimate;
 }
@@ -190,13 +253,14 @@ export async function testSend(user: Principal, id: string, rawPhone: string) {
   if (c.status === "DONE" || c.status === "CANCELLED") throw new MessagingError("BAD_STATE");
   const n = normalizePhone(rawPhone, "TR");
   if (!n.ok || !n.e164) throw new MessagingError("BAD_PHONE");
-  const tpl = await db.messageTemplate.findUniqueOrThrow({ where: { id: c.templateId } });
-  const text = withOptOut(renderTemplate(tpl.body, { ad: "Örnek", soyad: "Misafir", sehir: "İstanbul", temsilci_adi: user.name }), c.category as Category, optOutText());
-  const sent = await smsProvider().send({ to: n.e164, text, reference: `test-${c.id}` });
+  const content = await channelContent(channelOf(c), c.templateId, c.category as Category);
+  const values = { ad: "Örnek", soyad: "Misafir", sehir: "İstanbul", temsilci_adi: user.name };
+  const text = content.render(values);
+  const sent = await content.send(n.e164, values, `test-${c.id}`);
   await db.message.create({
-    data: { campaignId: c.id, channel: "SMS", direction: "OUT", templateId: tpl.id, bodyEnc: encrypt(text), segments: smsSegments(text).segments, provider: sent.provider, providerMessageId: sent.providerMessageId, status: "SENT", sentById: user.id, isTest: true, sentAt: new Date(), phoneHash: blindIndex(n.e164) },
+    data: { campaignId: c.id, channel: channelOf(c), direction: "OUT", ...content.templateRef, bodyEnc: encrypt(text), segments: content.segments(text), provider: sent.provider, providerMessageId: sent.id, status: "SENT", sentById: user.id, isTest: true, sentAt: new Date(), phoneHash: blindIndex(n.e164) },
   });
-  await audit({ actorId: user.id, action: "message.campaign.test", entity: "MessageCampaign", entityId: c.id, diff: { to: n.masked } });
+  await audit({ actorId: user.id, action: "message.campaign.test", entity: "MessageCampaign", entityId: c.id, diff: { to: n.masked, channel: channelOf(c) } });
   return { to: n.masked };
 }
 
@@ -238,14 +302,18 @@ export async function cancelCampaign(user: Principal, id: string, reason: string
   await audit({ actorId: user.id, action: "message.campaign.cancel", entity: "MessageCampaign", entityId: id, reason });
 }
 
-/** İşçi: uygunluk her mesajda yeniden kontrol edilir; hız sınırı SMS_TPS; iptal edilirse durur. */
+/** İşçi: uygunluk her mesajda yeniden kontrol edilir; hız sınırı (SMS_TPS / WA_TPS); iptal edilirse durur. */
 export async function sendCampaignJob(id: string) {
   const c = await db.messageCampaign.findUniqueOrThrow({ where: { id } });
   if (c.status !== "SENDING") return;
-  const tpl = await db.messageTemplate.findUniqueOrThrow({ where: { id: c.templateId } });
-  const { eligible, excluded } = await evaluateRecipients(c.category as Category, segmentWhere(c.segment as Segment));
-  const provider = smsProvider();
-  const tps = Math.max(1, Number(process.env.SMS_TPS ?? 10));
+  const channel = channelOf(c);
+  const content = await channelContent(channel, c.templateId, c.category as Category);
+  if (!content.approved) {
+    await db.messageCampaign.update({ where: { id }, data: { status: "CANCELLED", cancelReason: "Şablon artık onaylı değil (Meta durumu değişti)", finishedAt: new Date() } });
+    return { sent: 0, failed: 0 };
+  }
+  const { eligible, excluded } = await evaluateRecipients(c.category as Category, segmentWhere(c.segment as Segment), 50_000, channel);
+  const tps = Math.max(1, Number((channel === "WHATSAPP" ? process.env.WA_TPS : process.env.SMS_TPS) ?? 10));
   let sent = 0;
   let failed = 0;
   for (let i = 0; i < eligible.length; i++) {
@@ -254,19 +322,21 @@ export async function sendCampaignJob(id: string) {
       if (cur?.status !== "SENDING") break;
     }
     const r = eligible[i];
-    const text = withOptOut(renderTemplate(tpl.body, r.values), c.category as Category, optOutText());
+    const text = content.render(r.values);
     try {
-      const res = await provider.send({ to: r.e164, text, reference: `${c.id}:${r.guestId}` });
+      const res = await content.send(r.e164, r.values, `${c.id}:${r.guestId}`);
+      const conv = channel === "WHATSAPP" ? await openConversation({ phoneHash: r.phoneHash, e164: r.e164, guestId: r.guestId, teamId: r.teamId, assigneeId: r.ownerId }) : null;
       await db.$transaction([
         db.message.create({
-          data: { campaignId: c.id, guestId: r.guestId, phoneId: r.phoneId, phoneHash: blindIndex(r.e164), channel: "SMS", direction: "OUT", templateId: tpl.id, bodyEnc: encrypt(text), segments: smsSegments(text).segments, provider: res.provider, providerMessageId: res.providerMessageId, status: "SENT", sentAt: new Date() },
+          data: { campaignId: c.id, conversationId: conv?.id, guestId: r.guestId, phoneId: r.phoneId, phoneHash: r.phoneHash, channel, direction: "OUT", ...content.templateRef, bodyEnc: encrypt(text), segments: content.segments(text), provider: res.provider, providerMessageId: res.id, status: "SENT", sentAt: new Date() },
         }),
-        db.interaction.create({ data: { guestId: r.guestId, channel: "SMS", direction: "OUT", refId: c.id, summary: `Kampanya: ${c.name}` } }),
+        db.interaction.create({ data: { guestId: r.guestId, channel, direction: "OUT", refId: c.id, summary: `Kampanya: ${c.name}` } }),
+        ...(conv ? [db.conversation.update({ where: { id: conv.id }, data: { lastOutboundAt: new Date() } })] : []),
       ]);
       sent++;
     } catch (e) {
       await db.message.create({
-        data: { campaignId: c.id, guestId: r.guestId, phoneId: r.phoneId, channel: "SMS", direction: "OUT", templateId: tpl.id, bodyEnc: encrypt(text), provider: provider.name, status: "FAILED", error: (e as Error).message.slice(0, 200) },
+        data: { campaignId: c.id, guestId: r.guestId, phoneId: r.phoneId, channel, direction: "OUT", ...content.templateRef, bodyEnc: encrypt(text), provider: channel === "WHATSAPP" ? "whatsapp" : "sms", status: "FAILED", error: (e as Error).message.slice(0, 200) },
       });
       failed++;
     }
@@ -277,7 +347,7 @@ export async function sendCampaignJob(id: string) {
     where: { id },
     data: { stats: { sent, failed, excluded }, ...(final.status === "SENDING" ? { status: "DONE", finishedAt: new Date() } : {}) },
   });
-  await audit({ actorId: null, action: "message.campaign.finished", entity: "MessageCampaign", entityId: id, diff: { sent, failed } });
+  await audit({ actorId: null, action: "message.campaign.finished", entity: "MessageCampaign", entityId: id, diff: { sent, failed, channel } });
   return { sent, failed };
 }
 

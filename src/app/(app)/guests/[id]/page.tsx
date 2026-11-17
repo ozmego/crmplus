@@ -7,6 +7,10 @@ import { BlockForm, ConsentEditor, RevealPhone } from "@/components/guest-action
 import { FinanceForm } from "@/components/finance-form";
 import { db } from "@/server/db";
 import { sendSingleAction } from "@/app/(app)/messages/actions";
+import { guestWaAction } from "@/app/(app)/inbox/actions";
+import { checkPhoneAction } from "@/app/(app)/admin/integrations/actions";
+import { lastLineStatus, phoneCheckApproval, phoneCheckMode } from "@/server/telephony/phone-validation";
+import { waEnabled, waTemplatesForSend } from "@/server/services/whatsapp";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +25,9 @@ export default async function GuestCardPage({ params }: { params: Promise<{ id: 
   const activeBlocks = g.blocks.filter((b) => !b.removedAt);
   const consentByChannel = new Map(g.consents.map((c) => [c.channel, c]));
   const canGrant = can(user, "consent.edit");
+  const phoneCheckOn = can(user, "phone.check") && phoneCheckMode() !== "none" && !!(await phoneCheckApproval()).approvedAt;
+  const lineStatus = await lastLineStatus(g.phones.map((p) => p.id));
+  const waTemplates = can(user, "message.send.single") && (await waEnabled()) ? await waTemplatesForSend() : [];
   const smsTemplates = can(user, "message.send.single") ? await db.messageTemplate.findMany({ where: { status: "APPROVED", channel: "SMS" }, orderBy: { name: "asc" }, select: { id: true, name: true, category: true } }) : [];
 
   return (
@@ -54,7 +61,13 @@ export default async function GuestCardPage({ params }: { params: Promise<{ id: 
                   {p.isPrimary && <span className="pill border-ink text-ink">Birincil</span>}
                   {p.ownership === "DISPUTED" && <span className="pill border-critical text-critical">Tartışmalı (yanlış kişi)</span>}
                   {can(user, "field.contact.full") && <RevealPhone phoneId={p.id} />}
+                  {phoneCheckOn && <FinanceForm action={checkPhoneAction} submit="Hat durumunu sorgula" tone="secondary" inline fields={[{ name: "phoneId", type: "hidden", value: p.id }, { name: "guestId", type: "hidden", value: g.id }]} />}
                 </div>
+                {lineStatus.get(p.id) && (
+                  <p className="text-xs text-muted" data-testid="line-status">
+                    Hat durumu (dış servis, kesin değildir): <b>{({ ACTIVE: "aktif görünüyor", INACTIVE: "kapalı görünüyor", UNKNOWN: "bilinmiyor" } as Record<string, string>)[lineStatus.get(p.id)!.result] ?? lineStatus.get(p.id)!.result}</b> · {lineStatus.get(p.id)!.source} · güven {(lineStatus.get(p.id)!.raw as { confidence?: string } | null)?.confidence ?? "—"} · {fmt(lineStatus.get(p.id)!.at)}
+                  </p>
+                )}
                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
                   <PhoneStateBadge formatStatus={p.formatStatus} reachability={p.reachability} />
                   <span>Hat: {p.lineType ?? "bilinmiyor"} · Son kontrol: {fmt(p.lastCheckedAt)}</span>
@@ -76,6 +89,15 @@ export default async function GuestCardPage({ params }: { params: Promise<{ id: 
               <p className="mt-1 text-xs text-muted">SMS izni, durdurma kaydı ve İYS kontrolü gönderim anında yapılır.</p>
               <div className="mt-2">
                 <FinanceForm action={sendSingleAction} submit="Gönder" inline fields={[{ name: "guestId", type: "hidden", value: g.id }, { name: "templateId", label: "Onaylı şablon", type: "select", required: true, options: smsTemplates.map((t) => ({ value: t.id, label: `${t.name} (${t.category === "MARKETING" ? "pazarlama" : "bilgilendirme"})` })) }]} />
+              </div>
+            </details>
+          )}
+          {waTemplates.length > 0 && g.phones.length > 0 && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-sm font-semibold text-teal-ink">WhatsApp şablonu gönder</summary>
+              <p className="mt-1 text-xs text-muted">WhatsApp izni, durdurma kaydı ve İYS kontrolü gönderim anında yapılır; yanıtlar gelen kutusuna düşer.</p>
+              <div className="mt-2">
+                <FinanceForm action={guestWaAction} submit="WhatsApp gönder" inline fields={[{ name: "guestId", type: "hidden", value: g.id }, { name: "templateId", label: "Onaylı WhatsApp şablonu", type: "select", required: true, options: waTemplates.map((t) => ({ value: t.id, label: `${t.name} (${t.language})` })) }]} />
               </div>
             </details>
           )}

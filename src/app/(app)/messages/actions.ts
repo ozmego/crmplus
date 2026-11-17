@@ -25,6 +25,7 @@ import type { FormState } from "@/app/(app)/finance/actions";
 const ERR: Record<string, string> = {
   TEMPLATE_INVALID: "Şablon geçersiz.",
   TEMPLATE_NOT_APPROVED: "Şablon onaylanmamış.",
+  CHANNEL_DISABLED: "WhatsApp kanalı kapalı: yurt dışı aktarım değerlendirmesi kaydı girilmemiş.",
   CATEGORY_MISMATCH: "Kampanya kategorisi şablonla aynı olmalı.",
   BAD_STATE: "Kayıt bu işlem için uygun durumda değil.",
   SAME_PERSON: "Hazırlayan kişi onaylayamaz (iki kişili onay).",
@@ -82,10 +83,12 @@ export async function createCampaignAction(_: FormState, fd: FormData) {
       tags: list(f(fd, "tags")).length ? list(f(fd, "tags")) : undefined,
       lastContactBeforeDays: days ? Number(days) : undefined,
     });
+    const [chan, tplId] = f(fd, "templateId").split(":");
     const c = await createCampaign(u, {
       ...z.object({ name: z.string().min(3, "Kampanya adı en az 3 karakter"), category, templateId: z.string().min(1, "Şablon seçin") }).parse({
-        name: f(fd, "name"), category: f(fd, "category"), templateId: f(fd, "templateId"),
+        name: f(fd, "name"), category: f(fd, "category"), templateId: tplId ?? "",
       }),
+      channel: chan === "WA" ? "WHATSAPP" : "SMS",
       segment,
     });
     id = c.id;

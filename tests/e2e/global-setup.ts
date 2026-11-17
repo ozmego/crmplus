@@ -6,7 +6,7 @@ import { normalizePhone } from "../../src/lib/phone";
 /**
  * Yalnız testlerin kullandığı hesaplar (geliştiricinin kendi hesaplarına dokunulmaz).
  * Kural: her test dosyası ilk girişi farklı bir hesapla yapar; aynı hesabı iki test kullanmaz.
- *   auth-queue → temsilci1 · import → veri · admin → e2e-admin + temsilci2 · reports → operasyon + e2e-temsilci · compare → e2e-veri · finance → e2e-finans1/2 + e2e-temsilci-f · speech → e2e-ayar + e2e-temsilci-s + lider · messages → e2e-ops1/2 + e2e-temsilci-m · hr → e2e-ik1/2 + e2e-lider-p + e2e-temsilci-p + e2e-saha
+ *   auth-queue → temsilci1 · import → veri · admin → e2e-admin + temsilci2 · reports → operasyon + e2e-temsilci · compare → e2e-veri · finance → e2e-finans1/2 + e2e-temsilci-f · speech → e2e-ayar + e2e-temsilci-s + lider · messages → e2e-ops1/2 + e2e-temsilci-m · hr → e2e-ik1/2 + e2e-lider-p + e2e-temsilci-p + e2e-saha · qa → e2e-lider-q + e2e-temsilci-q + e2e-ops-q · whatsapp → e2e-ops-w1/2 + e2e-admin-w + e2e-temsilci-w · ops2 → e2e-ops-l + e2e-admin-i + e2e-temsilci-l · finance3 → e2e-finans3/4 + e2e-ops-a
  */
 const E2E_ONLY: [email: string, role: string, name: string][] = [
   ["e2e-admin@crmplus.local", "sys_admin", "E2E Yönetici"],
@@ -25,6 +25,19 @@ const E2E_ONLY: [email: string, role: string, name: string][] = [
   ["e2e-lider-p@crmplus.local", "team_lead", "E2E Lider Personel"],
   ["e2e-temsilci-p@crmplus.local", "agent", "E2E Temsilci Puantaj"],
   ["e2e-saha@crmplus.local", "field_staff", "E2E Saha Host"],
+  ["e2e-lider-q@crmplus.local", "team_lead", "E2E Lider Kalite"],
+  ["e2e-temsilci-q@crmplus.local", "agent", "E2E Temsilci Kalite"],
+  ["e2e-ops-q@crmplus.local", "ops_manager", "E2E Operasyon Kalite"],
+  ["e2e-ops-w1@crmplus.local", "ops_manager", "E2E WhatsApp Hazırlayan"],
+  ["e2e-ops-w2@crmplus.local", "ops_manager", "E2E WhatsApp Onaylayan"],
+  ["e2e-admin-w@crmplus.local", "sys_admin", "E2E WhatsApp Yönetici"],
+  ["e2e-temsilci-w@crmplus.local", "agent", "E2E Temsilci WhatsApp"],
+  ["e2e-ops-l@crmplus.local", "ops_manager", "E2E Operasyon Canlı"],
+  ["e2e-admin-i@crmplus.local", "sys_admin", "E2E Entegrasyon Yöneticisi"],
+  ["e2e-temsilci-l@crmplus.local", "agent", "E2E Temsilci Canlı"],
+  ["e2e-finans3@crmplus.local", "finance", "E2E Finans Ekstre"],
+  ["e2e-finans4@crmplus.local", "finance", "E2E Finans Mutabakat"],
+  ["e2e-ops-a@crmplus.local", "ops_manager", "E2E Operasyon Anomali"],
 ];
 const DEMO_RESET = ["temsilci1@crmplus.local", "temsilci2@crmplus.local", "veri@crmplus.local", "operasyon@crmplus.local", "lider@crmplus.local"];
 
@@ -57,7 +70,7 @@ export default async function globalSetup() {
     }
 
     // Ses testi: kapı her çalıştırmada kapalı başlar; ses temsilcisi Ekip 1'de (lider dinleyebilsin)
-    await db.setting.deleteMany({ where: { key: "recording.gate" } });
+    await db.setting.deleteMany({ where: { key: { in: ["recording.gate", "whatsapp.transfer", "phone.validation", "finance.engine"] } } });
     const team1 = await db.team.findUniqueOrThrow({ where: { name: "Ekip 1" } });
     await db.user.update({ where: { email: "e2e-temsilci-s@crmplus.local" }, data: { teamId: team1.id } });
 
@@ -65,6 +78,9 @@ export default async function globalSetup() {
     const stamp = Date.now() % 1_000_000;
     for (const [k, email] of ["temsilci1@crmplus.local", "e2e-temsilci-s@crmplus.local"].entries()) {
     const agent = await db.user.findUniqueOrThrow({ where: { email } });
+    // Önceki çalıştırmalardan açık kalan görev ve geri aramalar kuyruğun başına geçmesin
+    await db.task.updateMany({ where: { assigneeId: agent.id, status: { in: ["OPEN", "IN_PROGRESS"] } }, data: { status: "CANCELLED" } });
+    await db.callback.updateMany({ where: { assigneeId: agent.id, status: "PENDING" }, data: { status: "CANCELLED" } });
     for (let i = 0; i < 3; i++) {
       const n = normalizePhone(`053${3 + k}${String(stamp * 3 + i).padStart(7, "0").slice(-7)}`, "TR");
       if (!n.ok || !n.e164) continue;
@@ -90,6 +106,14 @@ export default async function globalSetup() {
     await db.team.updateMany({ where: { leaderId: lead.id }, data: { leaderId: null } });
     const teamP = await db.team.create({ data: { name: `E2E Ekip P ${stamp}`, leaderId: lead.id } });
     await db.user.updateMany({ where: { id: { in: hrUsers.filter((u) => !u.email.startsWith("e2e-ik")).map((u) => u.id) } }, data: { teamId: teamP.id } });
+    // Kalite testi: taze ekip; lider + temsilci
+    const qLead = await db.user.findUniqueOrThrow({ where: { email: "e2e-lider-q@crmplus.local" } });
+    await db.team.updateMany({ where: { leaderId: qLead.id }, data: { leaderId: null } });
+    const teamQ = await db.team.create({ data: { name: `E2E Ekip Q ${stamp}`, leaderId: qLead.id } });
+    await db.user.updateMany({ where: { email: { in: ["e2e-lider-q@crmplus.local", "e2e-temsilci-q@crmplus.local"] } }, data: { teamId: teamQ.id } });
+    // Haftalık örneklem kotası temsilci başınadır: önceki çalıştırmaların örneklemleri temizlenir
+    const qAgent = await db.user.findUniqueOrThrow({ where: { email: "e2e-temsilci-q@crmplus.local" } });
+    await db.qaSample.deleteMany({ where: { agentId: qAgent.id } });
   } finally {
     await db.$disconnect();
   }

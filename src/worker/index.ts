@@ -42,6 +42,9 @@ async function schedule() {
   await m.upsertJobScheduler("import-files", { pattern: "30 3 * * *", tz: "Europe/Istanbul" }, { name: "import-files" });
   // Puantaj: önceki gün (gece devreden vardiyalar 06:00'da biter → 06:30)
   await m.upsertJobScheduler("attendance", { pattern: "30 6 * * *", tz: "Europe/Istanbul" }, { name: "attendance" });
+  await m.upsertJobScheduler("iys-sync", { every: 15 * 60_000 }, { name: "iys-sync" });
+  // Kalite örneklemi: her Pazartesi geçen hafta için
+  await m.upsertJobScheduler("qa-sample", { pattern: "0 7 * * 1", tz: "Europe/Istanbul" }, { name: "qa-sample" });
 }
 
 schedule()

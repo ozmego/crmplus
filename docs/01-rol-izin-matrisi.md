@@ -125,6 +125,8 @@ Hepsi **bağımsız** izinlerdir; birini almak diğerini vermez.
 | `transcript.edit` | Transkript bölütü düzeltme (eski/yeni metin TranscriptEdit'e yazılır) |
 | `analysis.review` | Özet/etiket/aksiyon önerisini onaylama, düzeltme, itiraz |
 | `qa.review` | Kalite örneklemesi ve koçluk notu (otomatik puan yok) |
+| `qa.respond` | Personelin kendi incelemesine açıklama veya gerekçeli itiraz |
+| `vocabulary.manage` | Türkçe kurum sözlüğü (casino, otel, yer, kişi adları; numara girilemez) |
 
 ### Mesajlaşma (SMS Aşama 1, WhatsApp Aşama 2 — docs/10)
 | Anahtar | Açıklama |

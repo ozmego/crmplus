@@ -1,5 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { nightlyAttendance } from "@/server/services/timesheet";
+import { generateSamples } from "@/server/services/qa";
+import { addDays, istDate, weekStartOf } from "@/lib/hr/time";
 import { db } from "@/server/db";
 import { audit } from "@/server/audit";
 import { removeObject } from "@/server/storage";
@@ -18,6 +20,10 @@ export async function runMaintenance(name: string, now = new Date()) {
       return purgeImportFiles(now);
     case "attendance":
       return nightlyAttendance(now);
+    case "iys-sync":
+      return syncIysOutbox();
+    case "qa-sample":
+      return generateSamples(addDays(weekStartOf(istDate(now)), -7));
     default:
       throw new Error(`Bilinmeyen bakım işi: ${name}`);
   }
@@ -116,4 +122,19 @@ export async function purgeImportFiles(now: Date) {
   }
   if (expired.length) await audit({ actorId: null, action: "retention.import_files", diff: { deleted: expired.length } });
   return { deleted: expired.length };
+}
+
+/** İYS ret bildirimleri: bağlantı yoksa (IYS_PROVIDER=none) bekler; hata alınırsa 5 denemeye kadar tekrarlanır. */
+export async function syncIysOutbox(limit = 200) {
+  const { iysMode, iysReportOptOut } = await import("@/server/messaging/iys");
+  const { decrypt } = await import("@/server/crypto/field-encryption");
+  if (iysMode() === "none") return { skipped: true };
+  const items = await db.iysOutbox.findMany({ where: { status: { in: ["PENDING", "FAILED"] }, attempts: { lt: 5 } }, orderBy: { createdAt: "asc" }, take: limit });
+  let sent = 0;
+  for (const it of items) {
+    const r = await iysReportOptOut(decrypt(it.phoneEnc), it.type as "MESAJ");
+    await db.iysOutbox.update({ where: { id: it.id }, data: { status: r === "PENDING" ? "PENDING" : r, attempts: { increment: 1 }, sentAt: r === "SENT" ? new Date() : null, error: r === "FAILED" ? "İYS yanıtı başarısız" : null } });
+    if (r === "SENT") sent++;
+  }
+  return { processed: items.length, sent };
 }

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { can, requirePage } from "@/server/auth/rbac";
 import { db } from "@/server/db";
-import { EXCLUSION_LABEL_TR, type ExclusionReason } from "@/server/services/messaging";
+import { campaignTemplateBody, EXCLUSION_LABEL_TR, type ExclusionReason } from "@/server/services/messaging";
 import { FinanceForm } from "@/components/finance-form";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { CampaignApprove } from "@/components/campaign-approve";
@@ -24,8 +24,8 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const c = await db.messageCampaign.findUnique({ where: { id } });
   if (!c) notFound();
-  const [tpl, tests, counts, people] = await Promise.all([
-    db.messageTemplate.findUnique({ where: { id: c.templateId } }),
+  const [tplBody, tests, counts, people] = await Promise.all([
+    campaignTemplateBody(c).catch(() => "(şablon bulunamadı)"),
     db.message.findMany({ where: { campaignId: id, isTest: true }, orderBy: { createdAt: "desc" }, take: 5 }),
     db.message.groupBy({ by: ["status"], where: { campaignId: id, isTest: false }, _count: true }),
     db.user.findMany({ where: { id: { in: [c.preparedBy, c.approvedBy ?? ""] } }, select: { id: true, name: true } }),
@@ -44,7 +44,7 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
         <p className="eyebrow">MESAJLAR · KAMPANYA</p>
         <h1 className="page-title">{c.name}</h1>
         <p className="mt-1 text-sm text-muted">
-          <span className="pill" data-testid="campaign-status">{CAMPAIGN_STATUS[c.status]}</span> · {c.category === "MARKETING" ? "Pazarlama" : "Bilgilendirme"} · Hazırlayan: {name.get(c.preparedBy) ?? "—"}
+          <span className="pill" data-testid="campaign-status">{CAMPAIGN_STATUS[c.status]}</span> · <span className="pill" data-testid="campaign-channel">{c.channel === "WHATSAPP" ? "WhatsApp" : "SMS"}</span> · {c.category === "MARKETING" ? "Pazarlama" : "Bilgilendirme"} · Hazırlayan: {name.get(c.preparedBy) ?? "—"}
           {c.approvedBy && ` · Onaylayan: ${name.get(c.approvedBy) ?? "—"} (${fmt(c.approvedAt)})`} · <Link href="/messages" className="text-teal-ink underline">Tüm kampanyalar</Link>
         </p>
       </div>
@@ -82,7 +82,7 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
 
         <section className="card">
           <h2 className="card-title">2 · Şablon ve test</h2>
-          <p className="whitespace-pre-wrap text-sm">{tpl?.body}</p>
+          <p className="whitespace-pre-wrap text-sm">{tplBody}</p>
           {est?.preview.length ? (
             <div className="mt-2 text-sm">
               <p className="label">Örnek alıcı önizlemesi</p>

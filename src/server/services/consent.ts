@@ -56,6 +56,20 @@ export async function applyContactBlock(
     });
     await tx.callback.updateMany({ where: { guestId: args.guestId, status: "PENDING" }, data: { status: "CANCELLED" } });
   }
+  // İYS ret bildirimi (docs/04 §5): Türkiye numaraları; mesaj kanalları → MESAJ, arama → ARAMA
+  const iysTypes = new Set<"MESAJ" | "ARAMA">();
+  for (const ch of channels) {
+    if (ch === "SMS" || ch === "WHATSAPP") iysTypes.add("MESAJ");
+    if (ch === "CALL") iysTypes.add("ARAMA");
+  }
+  if (iysTypes.size) {
+    const phones = await tx.guestPhone.findMany({ where: { guestId: args.guestId, country: "TR" }, select: { phoneHash: true, e164Enc: true } });
+    for (const p of phones) {
+      for (const type of iysTypes) {
+        await tx.iysOutbox.create({ data: { phoneHash: p.phoneHash, phoneEnc: p.e164Enc, type, guestId: args.guestId, blockId: block.id } });
+      }
+    }
+  }
   return block;
 }
 

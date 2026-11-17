@@ -26,7 +26,16 @@ export const ruleSchema = z.object({
   currency: z.string().regex(/^[A-Z]{3}$/),
   priority: z.number().int().min(1).default(1),
   netWinBehavior: z.enum(["ZERO", "CARRY_OVER", "NEGATIVE"]),
-  condition: z.string().max(200).optional(), // ör. "rolling ≥ 500.000 TRY" (Aşama 3'te yapılandırılmış hale gelir)
+  condition: z.string().max(200).optional(), // serbest açıklama (hesaba girmez); hesap `filter` ile yapılır
+  // Aşama 3: nitelikli misafir filtresi — ülke / iş ortağı bazlı kurallar (docs/06 §4)
+  filter: z
+    .object({
+      countries: z.array(z.string().regex(/^[A-Z]{2}$/, "Ülke kodu iki büyük harf (ör. TR, DE)")).max(50).optional(),
+      minRollingPerGuest: z.number().min(0).optional(),
+      minNetLossPerGuest: z.number().min(0).optional(),
+    })
+    .strict()
+    .optional(),
 });
 
 export const contractVersionSchema = z

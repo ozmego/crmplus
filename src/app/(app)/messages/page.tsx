@@ -4,6 +4,7 @@ import { db } from "@/server/db";
 import { FinanceForm } from "@/components/finance-form";
 import { CAMPAIGN_STATUS } from "@/lib/sms";
 import { createCampaignAction } from "./actions";
+import { waEnabled, waTemplatesForSend } from "@/server/services/whatsapp";
 
 export const dynamic = "force-dynamic";
 
@@ -13,15 +14,20 @@ export default async function MessagesPage() {
     db.messageCampaign.findMany({ orderBy: { createdAt: "desc" }, take: 100 }),
     db.messageTemplate.findMany({ where: { status: "APPROVED" }, orderBy: { name: "asc" } }),
   ]);
+  const waTemplates = (await waEnabled()) ? await waTemplatesForSend() : [];
+  const options = [
+    ...templates.map((t) => ({ value: `SMS:${t.id}`, label: `SMS · ${t.name} (${t.category === "MARKETING" ? "pazarlama" : "bilgilendirme"})` })),
+    ...waTemplates.map((t) => ({ value: `WA:${t.id}`, label: `WhatsApp · ${t.name} ${t.language} (${t.category === "MARKETING" ? "pazarlama" : "bilgilendirme"})` })),
+  ];
 
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <p className="eyebrow">MESAJLAR · SMS</p>
-        <h1 className="page-title">SMS kampanyaları</h1>
+        <p className="eyebrow">MESAJLAR · KAMPANYA</p>
+        <h1 className="page-title">Mesaj kampanyaları (SMS · WhatsApp)</h1>
         <p className="mt-1 text-sm text-muted">
           Kapılar: amaç ve kanal → segment ve izin → şablon ve test → iki kişili onay → gönderim. Segment yalnız dil, ülke, etiket ve son iletişim tarihiyle kurulur; finansal veri kullanılamaz.{" "}
-          <Link href="/messages/templates" className="font-semibold text-teal-ink underline">Şablonlar</Link>
+          <Link href="/messages/templates" className="font-semibold text-teal-ink underline">Şablonlar</Link> · <Link href="/messages/whatsapp" className="font-semibold text-teal-ink underline">WhatsApp şablonları</Link>
         </p>
       </div>
 
@@ -32,7 +38,7 @@ export default async function MessagesPage() {
       {can(user, "message.campaign.prepare") && (
         <section className="card">
           <h2 className="card-title">Yeni kampanya taslağı</h2>
-          {templates.length === 0 ? (
+          {options.length === 0 ? (
             <p className="text-sm text-muted">Önce onaylı bir şablon gerekir.</p>
           ) : (
             <FinanceForm
@@ -41,7 +47,7 @@ export default async function MessagesPage() {
               fields={[
                 { name: "name", label: "Kampanya adı", required: true },
                 { name: "category", label: "Kategori", type: "select", required: true, defaultValue: "MARKETING", options: [{ value: "MARKETING", label: "Pazarlama" }, { value: "INFORMATIONAL", label: "Bilgilendirme" }] },
-                { name: "templateId", label: "Onaylı şablon", type: "select", required: true, options: templates.map((t) => ({ value: t.id, label: `${t.name} (${t.category === "MARKETING" ? "pazarlama" : "bilgilendirme"})` })) },
+                { name: "templateId", label: "Onaylı şablon (kanal)", type: "select", required: true, options },
                 { name: "languages", label: "Dil (ör. tr, en)", placeholder: "boş = tümü" },
                 { name: "countries", label: "Ülke kodu (ör. DE, GB)", placeholder: "boş = tümü" },
                 { name: "tags", label: "Etiket", placeholder: "virgülle ayırın" },

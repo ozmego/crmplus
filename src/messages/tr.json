@@ -24,9 +24,13 @@
     "review": "İnceleme",
     "calls": "Çağrılar",
     "messages": "Mesajlar",
+    "inbox": "Gelen kutusu",
     "reports": "Raporlar",
     "finance": "Finans",
     "hr": "Personel",
+    "qa": "Kalite",
+    "vocabulary": "Sözlük",
+    "integrations": "Entegrasyonlar",
     "admin": "Yönetim",
     "audit": "Denetim",
     "settings": "Ayarlar"

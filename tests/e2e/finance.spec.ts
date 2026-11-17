@@ -59,6 +59,10 @@ test("finans: sözleşme → trip → sonuç → hesap → iki kişili onay → 
   const p2 = await browser.newPage();
   await firstLogin(p2, "e2e-finans2@crmplus.local");
   await p2.goto(periodUrl);
+  // Gölge mod: motor 369.000 (364.000 + rolling ≥ 500.000 olan 1 misafir × 5.000); elle 424.000 → fark gerekçesi zorunlu
+  await expect(p2.getByTestId("engine-total")).toHaveText("369.000,00 TRY");
+  await expect(p2.getByTestId("calc-diff")).toContainText("fark 55.000,00 TRY");
+  await p2.getByLabel("Motorla fark gerekçesi").fill("11 nitelikli misafir ekstrede ayrıca bildirildi");
   await p2.getByRole("button", { name: "Onayla" }).click();
   await expect(p2.getByText("Onaylandı", { exact: true })).toBeVisible();
   await p2.getByRole("button", { name: "Dönemi kilitle" }).click();
@@ -67,6 +71,8 @@ test("finans: sözleşme → trip → sonuç → hesap → iki kişili onay → 
   const calc = await db.commissionCalculation.findFirstOrThrow({ where: { period: { casino: { name: casinoName } } }, include: { period: true } });
   expect(calc.status).toBe("APPROVED");
   expect(calc.amount.toString()).toBe("424000");
+  expect(calc.engineAmount?.toString()).toBe("369000");
+  expect(calc.method).toBe("MANUAL");
   const snap = calc.snapshot as { contracts: { version: number }[]; inputs: unknown[] };
   expect(snap.contracts[0].version).toBe(1);
   expect(snap.inputs).toHaveLength(1);

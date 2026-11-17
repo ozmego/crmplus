@@ -11,7 +11,7 @@ Gerekenler: Node 22+, pnpm, Docker Desktop.
 ```bash
 pnpm install
 cp .env.example .env          # anahtarları doldurun (aşağıya bakın)
-pnpm db:up                    # PostgreSQL 16 (127.0.0.1:55433) + Redis (127.0.0.1:56380)
+pnpm db:up                    # PostgreSQL 16 (127.0.0.1:25433) + Redis (127.0.0.1:16380)
 pnpm db:migrate
 SEED_DEMO=1 pnpm db:seed      # roller, sonuç kodları, yönetici + isteğe bağlı demo verisi
 
@@ -51,6 +51,8 @@ pnpm test:e2e                 # uçtan uca (Playwright, Chrome) — dev sunucusu
 ```
 
 E2E kurulumu yalnız `e2e-*` test hesaplarını ve demo hesaplarının giriş durumunu sıfırlar; her spec farklı bir hesapla giriş yapar.
+
+Tam paket uzun sürer; Next.js geliştirme sunucusu bellek eşiğini aşınca kendini yeniden başlatır (`Server is approaching the used memory threshold`) ve o anda açık istekler kopar. Tam paket için sunucuyu daha yüksek bellekle başlatın: `NODE_OPTIONS=--max-old-space-size=8192 pnpm exec next dev -p 3210`.
 
 ## Dizinler
 

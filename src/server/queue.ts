@@ -15,7 +15,7 @@ let connection: IORedis | null = null;
 const queues = new Map<QueueName, Queue>();
 
 export function redisConnection() {
-  connection ??= new IORedis(process.env.REDIS_URL ?? "redis://localhost:56380", { maxRetriesPerRequest: null });
+  connection ??= new IORedis(process.env.REDIS_URL ?? "redis://localhost:16380", { maxRetriesPerRequest: null });
   return connection;
 }
 

@@ -17,6 +17,7 @@ import {
   lockPeriod,
   transitionCalculation,
 } from "@/server/services/finance";
+import { applyStatement, importStatement, reconcileCalculation, setEngineMode } from "@/server/services/finance-engine";
 
 export type FormState = { error?: string; ok?: string } | undefined;
 
@@ -38,6 +39,17 @@ const ERR: Record<string, string> = {
   ALREADY_LOCKED: "Dönem zaten kilitli.",
   PERIOD_NOT_LOCKED: "Açık dönemde düzeltme yerine yeni hesaplama sürümü kullanılır.",
   FORBIDDEN: "Bu işlem için yetkiniz yok.",
+  AMOUNT_REQUIRED_SHADOW: "Gölge modda tutar elle girilir; motor sonucu yanında gösterilir.",
+  DIFF_REASON_REQUIRED: "Elle girilen tutar motor sonucundan farklı: onay için fark gerekçesi yazın.",
+  BAD_PERIOD: "Dönem YYYY-AA biçiminde olmalı.",
+  FILE_TOO_LARGE: "Dosya çok büyük.",
+  INFECTED: "Dosya güvenlik taramasından geçmedi.",
+  PARSE_FAILED: "Dosya okunamadı (xlsx veya csv olmalı).",
+  COLUMNS_MISSING: "Gerekli sütunlar bulunamadı (net kayıp ve CRM no veya oyuncu no).",
+  DUPLICATE_STATEMENT: "Bu dosya bu casino için zaten yüklenmiş.",
+  STATEMENT_MISMATCH: "Ekstre bu casino ve döneme ait değil.",
+  RECON_REASON_REQUIRED: "Ekstre ile fark var: mutabakat için gerekçe yazın.",
+  NO_FILE: "Dosya seçin.",
 };
 
 async function run(perm: Permission, fn: (u: Awaited<ReturnType<typeof requirePermission>>) => Promise<unknown>, okMsg: string): Promise<FormState> {
@@ -47,7 +59,7 @@ async function run(perm: Permission, fn: (u: Awaited<ReturnType<typeof requirePe
     revalidatePath("/finance", "layout");
     return { ok: okMsg };
   } catch (e) {
-    if (e instanceof FinanceError) return { error: ERR[e.code] ?? e.message };
+    if (e instanceof FinanceError) return { error: e.code === "COLUMNS_MISSING" ? `${ERR.COLUMNS_MISSING} ${e.message}` : ERR[e.code] ?? e.message };
     if (e instanceof ForbiddenError) return { error: ERR.FORBIDDEN };
     if (e instanceof z.ZodError) return { error: e.issues.map((i) => i.message).join(" · ") };
     throw e;
@@ -108,8 +120,8 @@ export async function addResultAction(_: FormState, fd: FormData) {
 
 export async function createCalcAction(_: FormState, fd: FormData) {
   return run("finance.calc.prepare", (u) =>
-    createCalculation(u, z.object({ periodId: z.string().min(1), amount: money, note: z.string().min(5, "Hesap açıklaması en az 5 karakter") }).parse({
-      periodId: f(fd, "periodId"), amount: f(fd, "amount"), note: f(fd, "note"),
+    createCalculation(u, z.object({ periodId: z.string().min(1), amount: money.optional(), note: z.string().min(5, "Hesap açıklaması en az 5 karakter") }).parse({
+      periodId: f(fd, "periodId"), amount: f(fd, "amount") || undefined, note: f(fd, "note"),
     })), "Hesaplama taslağı oluşturuldu.");
 }
 
@@ -129,4 +141,25 @@ export async function createAdjustmentAction(_: FormState, fd: FormData) {
 
 export async function approveAdjustmentAction(_: FormState, fd: FormData) {
   return run("finance.calc.approve", (u) => approveAdjustment(u, f(fd, "adjustmentId")), "Düzeltme onaylandı.");
+}
+
+export async function uploadStatementAction(_: FormState, fd: FormData) {
+  const file = fd.get("file");
+  if (!(file instanceof File) || !file.size) return { error: ERR.NO_FILE };
+  return run("finance.result.edit", async (u) =>
+    importStatement(u, { casinoId: f(fd, "casinoId"), period: f(fd, "period"), fileName: file.name, data: Buffer.from(await file.arrayBuffer()), invertSign: f(fd, "invertSign") === "1" }), "Ekstre yüklendi ve eşlendi.");
+}
+
+export async function applyStatementAction(_: FormState, fd: FormData) {
+  let n = 0;
+  const r = await run("finance.result.edit", async (u) => (n = await applyStatement(u, f(fd, "statementId"))), "");
+  return r?.error ? r : { ok: `${n} satır kaynak referansıyla sonuç olarak işlendi.` };
+}
+
+export async function reconcileAction(_: FormState, fd: FormData) {
+  return run("finance.calc.approve", (u) => reconcileCalculation(u, f(fd, "calcId"), f(fd, "statementId"), f(fd, "reason") || undefined), "Mutabakat kaydedildi.");
+}
+
+export async function engineModeAction(_: FormState, fd: FormData) {
+  return run("finance.calc.approve", (u) => setEngineMode(u, f(fd, "mode") === "PRIMARY" ? "PRIMARY" : "SHADOW", f(fd, "reason")), "Motor modu güncellendi.");
 }

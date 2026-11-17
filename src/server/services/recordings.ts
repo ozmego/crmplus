@@ -1,4 +1,5 @@
 import "server-only";
+import { activeVocabulary } from "@/server/services/qa";
 import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/server/db";
@@ -89,8 +90,8 @@ export async function transcribeRecording(recordingId: string) {
   await db.transcript.update({ where: { id: t.id }, data: { status: "PROCESSING" } });
   try {
     const audio = await getDecrypted(rec.storageKey);
-    const vocabulary = (await db.setting.findUnique({ where: { key: "speech.vocabulary" } }))?.value as string[] | undefined;
-    const out = await transcribe({ audio, mimeType: rec.mimeType ?? "audio/mpeg", channels: rec.channels, language: "tr", vocabulary: vocabulary ?? [] });
+    const vocabulary = await activeVocabulary(); // Türkçe kurum sözlüğü (Aşama 2)
+    const out = await transcribe({ audio, mimeType: rec.mimeType ?? "audio/mpeg", channels: rec.channels, language: "tr", vocabulary });
 
     const kinds = new Set<RedactionKind>();
     const redacted: Segment[] = out.segments.map((s) => {

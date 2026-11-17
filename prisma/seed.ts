@@ -139,6 +139,12 @@ const LEAVE_TYPES = [
   { code: "İD", name: "İdari izin", paid: true, needsDocument: false },
 ];
 
+async function seedQa() {
+  if (await db.qaCriteriaSet.count()) return;
+  const { DEFAULT_CRITERIA } = await import("../src/lib/qa-criteria");
+  await db.qaCriteriaSet.create({ data: { name: "Görüşme kalite kriterleri", version: 1, criteria: JSON.parse(JSON.stringify(DEFAULT_CRITERIA)), createdBy: "seed" } });
+}
+
 async function seedHr() {
   for (const s of SHIFTS) await db.shiftTemplate.upsert({ where: { name: s.name }, update: s, create: s });
   for (const t of LEAVE_TYPES) await db.leaveType.upsert({ where: { code: t.code }, update: t, create: t });
@@ -170,6 +176,7 @@ async function seedHrDemo() {
 async function main() {
   await seedRoles();
   await seedHr();
+  await seedQa();
   for (const [i, d] of DISPOSITIONS.entries()) {
     await db.disposition.upsert({ where: { code: d.code }, update: { ...d, sortOrder: i + 1 }, create: { ...d, sortOrder: i + 1 } });
   }

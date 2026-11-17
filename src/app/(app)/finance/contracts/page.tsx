@@ -20,12 +20,25 @@ const EXAMPLE = JSON.stringify(
       priority: 1,
       netWinBehavior: "CARRY_OVER",
     },
+    {
+      name: "Nitelikli misafir",
+      basis: "GUEST_COUNT",
+      scope: "PERIOD_TOTAL",
+      tierMode: "MARGINAL",
+      tiers: [{ from: 0, to: null, amount: 5000 }],
+      min: null,
+      max: null,
+      currency: "TRY",
+      priority: 2,
+      netWinBehavior: "ZERO",
+      filter: { minRollingPerGuest: 500000 },
+    },
   ],
   null,
   1,
 );
 
-type Rule = { name: string; basis: string; scope: string; tierMode: string; tiers: { from: number; to: number | null; rate?: number; amount?: number }[]; currency: string; netWinBehavior: string; min: number | null; max: number | null };
+type Rule = { name: string; basis: string; scope: string; tierMode: string; tiers: { from: number; to: number | null; rate?: number; amount?: number }[]; currency: string; netWinBehavior: string; min: number | null; max: number | null; filter?: { countries?: string[]; minRollingPerGuest?: number; minNetLossPerGuest?: number } };
 const BASIS: Record<string, string> = { NET_LOSS: "Net kayıp", ROLLING: "Rolling", GUEST_COUNT: "Misafir sayısı", TRIP_COUNT: "Trip sayısı" };
 const SCOPE: Record<string, string> = { PER_GUEST: "misafir başı", PER_TRIP: "trip başı", PERIOD_TOTAL: "dönem toplamı" };
 const NETWIN: Record<string, string> = { ZERO: "sıfırla", CARRY_OVER: "sonraki döneme devret", NEGATIVE: "negatif komisyon" };
@@ -44,7 +57,7 @@ export default async function ContractsPage() {
       <div>
         <p className="eyebrow">FİNANS</p>
         <h1 className="page-title">Casinolar ve sözleşmeler</h1>
-        <p className="mt-1 text-sm text-muted">Sözleşmeler sürümlüdür; yeni sürüm öncekini kapatır, geçmiş hesaplar kendi sürümünü korur. Kural modeli: docs/06 §4.</p>
+        <p className="mt-1 text-sm text-muted">Sözleşmeler sürümlüdür; yeni sürüm öncekini kapatır, geçmiş hesaplar kendi sürümünü korur. Kural modeli: docs/06 §4. Nitelikli misafir filtresi (ülke, misafir başı en az rolling veya net kayıp) motor tarafından uygulanır; serbest metin koşul hesaba girmez.</p>
       </div>
 
       {canManage && (
@@ -82,6 +95,7 @@ export default async function ContractsPage() {
                           <b>{r.name}</b>: {BASIS[r.basis]} · {SCOPE[r.scope]} · {r.tierMode === "MARGINAL" ? "marjinal" : "toplam"} kademe ·{" "}
                           {r.tiers.map((t) => `${t.from.toLocaleString("tr-TR")}–${t.to === null ? "∞" : t.to.toLocaleString("tr-TR")}: ${t.rate !== undefined ? `%${(t.rate * 100).toLocaleString("tr-TR")}` : `${t.amount?.toLocaleString("tr-TR")} ${r.currency}`}`).join(" · ")}
                           {r.min !== null ? ` · taban ${r.min}` : ""}{r.max !== null ? ` · tavan ${r.max}` : ""} · net kazançta: {NETWIN[r.netWinBehavior]}
+                          {r.filter && <> · nitelikli misafir: {[r.filter.countries?.length ? `ülke ${r.filter.countries.join("/")}` : null, r.filter.minRollingPerGuest !== undefined ? `rolling ≥ ${r.filter.minRollingPerGuest.toLocaleString("tr-TR")}` : null, r.filter.minNetLossPerGuest !== undefined ? `net kayıp ≥ ${r.filter.minNetLossPerGuest.toLocaleString("tr-TR")}` : null].filter(Boolean).join(", ")}</>}
                         </li>
                       ))}
                     </ul>

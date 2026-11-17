@@ -54,11 +54,5 @@ export function smsProvider(): SmsProvider {
 
 export const optOutText = () => process.env.SMS_OPT_OUT_TEXT ?? "Listeden çıkmak için RET yazıp gönderin.";
 
-/**
- * İYS sorgusu (docs/04 §6, docs/10 §3). Aşama 1'de bağlı değil: "UNAVAILABLE" döner ve Türkiye numaralarına
- * pazarlama mesajı GÖNDERİLMEZ ("izinli varsay" davranışı yoktur). Aşama 2'de sağlayıcının İYS API'si bağlanır.
- */
-export type IysResult = "ONAY" | "RET" | "UNAVAILABLE";
-export async function iysCheck(_e164: string): Promise<IysResult> {
-  return "UNAVAILABLE";
-}
+// İYS adaptörü ayrı modüldedir: src/server/messaging/iys.ts
+export { iysCheck, type IysResult } from "@/server/messaging/iys";

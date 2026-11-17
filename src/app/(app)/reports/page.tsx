@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { can, requirePage, scopeOf } from "@/server/auth/rbac";
 import { agentReport, todayIso } from "@/server/services/reports";
 import { hm, mmss, pct } from "@/lib/kpi";
@@ -20,7 +21,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       <div>
         <p className="eyebrow">RAPORLAR</p>
         <h1 className="page-title">Personel ve ekip raporu</h1>
-        <p className="mt-1 text-sm text-muted">{SCOPE[scopeOf(user, "report.view") ?? "own"]} · {from === to ? from : `${from} – ${to}`} · İstanbul saati</p>
+        <p className="mt-1 text-sm text-muted">{SCOPE[scopeOf(user, "report.view") ?? "own"]} · {from === to ? from : `${from} – ${to}`} · İstanbul saati{can(user, "report.product") && <> · <Link href="/reports/speech" className="font-semibold text-teal-ink underline">Ses analizi doğruluk paneli</Link> · <Link href="/reports/anomalies" className="font-semibold text-teal-ink underline">Operasyon anomalileri</Link></>}</p>
       </div>
 
       <form className="flex flex-wrap items-end gap-3">
