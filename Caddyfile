@@ -1,0 +1,30 @@
+# crmPlus ters vekil ve HTTPS (docs/12).
+#   CRMPLUS_DOMAIN  ör. crm.sirket.com.tr (iç ağda: crm.sirket.local veya sunucu adı)
+#   CRMPLUS_TLS     internete açık kurulumda ACME e-postası (ör. bt@sirket.com.tr) → Let's Encrypt sertifikası
+#                   iç ağda: internal (vars.) → Caddy yerel CA'sıyla sertifika üretir; kök sertifika istemcilere dağıtılır
+# Caddy'nin önünde başka vekil yoktur: istemciden gelen X-Forwarded-* başlıklarına güvenilmez (trusted_proxies tanımlanmaz),
+# böylece denetim kayıtlarındaki IP sahte başlıkla değiştirilemez.
+
+{$CRMPLUS_DOMAIN} {
+	tls {$CRMPLUS_TLS:internal}
+
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	# İçe aktarma ve ekstre dosyaları en fazla 50 MB (docs/02 §1)
+	request_body {
+		max_size 60MB
+	}
+
+	reverse_proxy app:3000
+
+	log {
+		output stdout
+		format json
+	}
+}

@@ -1,0 +1,15 @@
+.git
+.next
+node_modules
+storage
+test-results
+playwright-report
+tests
+speech
+backups
+.env
+.env.*
+!.env.example
+*.log
+tsconfig.tsbuildinfo
+next-env.d.ts

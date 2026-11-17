@@ -14,7 +14,10 @@
     "db:studio": "prisma studio",
     "worker": "tsx --env-file=.env --require ./src/worker/server-only-shim.cjs src/worker/index.ts",
     "test:e2e": "playwright test",
-    "template:import": "tsx scripts/make-import-template.ts"
+    "template:import": "tsx scripts/make-import-template.ts",
+    "worker:prod": "tsx --require ./src/worker/server-only-shim.cjs src/worker/index.ts",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed:prod": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
@@ -53,5 +56,9 @@
   },
   "prisma": {
     "seed": "tsx --env-file=.env prisma/seed.ts"
-  }
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.10.0"
 }

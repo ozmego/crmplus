@@ -1,0 +1,126 @@
+# crmPlus üretim yığını (docs/12-kurulum-isletim.md).
+#   docker compose --env-file .env.production up -d --build
+# Yalnız Caddy dışarıya açıktır (80/443). Veritabanı, Redis, ClamAV ve uygulama iç ağdadır.
+name: crmplus
+
+x-app-env: &app-env
+  env_file: .env.production
+  environment:
+    NODE_ENV: production
+    STORAGE_DIR: /app/storage
+    DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+    REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+    CLAMAV_HOST: clamav
+    CLAMAV_PORT: "3310"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" --no-auth-warning ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+  clamav:
+    image: clamav/clamav:1.4
+    restart: unless-stopped
+    volumes:
+      - clamav:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "clamdcheck.sh"]
+      interval: 60s
+      timeout: 10s
+      retries: 10
+      start_period: 300s
+
+  # Tek seferlik: veritabanı göçleri (her güncellemede çalışır, idempotent)
+  migrate:
+    build: { context: ., target: worker }
+    image: crmplus-worker:latest
+    <<: *app-env
+    command: ["pnpm", "exec", "prisma", "migrate", "deploy"]
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  app:
+    build: { context: ., target: app }
+    image: crmplus-app:latest
+    <<: *app-env
+    restart: unless-stopped
+    volumes:
+      - storage:/app/storage
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  worker:
+    image: crmplus-worker:latest
+    <<: *app-env
+    restart: unless-stopped
+    volumes:
+      - storage:/app/storage
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "${CRMPLUS_HTTP_PORT:-80}:80"
+      - "${CRMPLUS_HTTPS_PORT:-443}:443"
+    environment:
+      CRMPLUS_DOMAIN: ${CRMPLUS_DOMAIN}
+      CRMPLUS_TLS: ${CRMPLUS_TLS:-internal}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+  # İsteğe bağlı: şirket içi Türkçe transkript (GPU). docker compose --profile speech up -d
+  speech:
+    profiles: ["speech"]
+    build: ./speech
+    restart: unless-stopped
+    environment:
+      SPEECH_TOKEN: ${SPEECH_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  pgdata:
+  redisdata:
+  clamav:
+  storage:
+  caddy-data:
+  caddy-config:

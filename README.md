@@ -42,6 +42,19 @@ pnpm worker                   # ayrı terminalde: arka plan işçisi (içe aktar
 
 Başlıklar: `x-crmplus-timestamp` (unix saniye) ve `x-crmplus-signature` = hex HMAC-SHA256(secret, `${timestamp}.${gövde}`). ±5 dakika dışındaki ve tekrarlanan olaylar işlenmez.
 
+## Üretim kurulumu
+
+Ayrıntı: [docs/12-kurulum-isletim.md](docs/12-kurulum-isletim.md).
+
+```bash
+sh scripts/init-env.sh crm.sirket.com.tr          # .env.production (rastgele parola ve anahtarlar)
+docker compose --env-file .env.production up -d --build
+docker compose --env-file .env.production run --rm worker pnpm db:seed:prod
+sh scripts/backup.sh /yedek/crmplus               # yedek; geri yükleme testi: scripts/restore.sh <klasör> --test
+```
+
+Yalnız Caddy (80/443) dışarı açıktır; PostgreSQL, Redis, ClamAV ve uygulama iç ağdadır. Sağlık kontrolü: `/api/health`.
+
 ## Testler
 
 ```bash

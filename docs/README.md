@@ -15,6 +15,7 @@ Bu klasör, geliştirme başlamadan önce kesinleşmesi gereken kuralları içer
 | 09 | [Ses kaydı ve Türkçe analiz politikası](09-konusma-kaydi-analiz-politikasi.md) | Uyum + çağrı merkezi | Taslak — hukuk teyidi bekliyor |
 | 10 | [Mesajlaşma politikası (SMS/WhatsApp)](10-mesajlasma-politikasi.md) | Uyum + pazarlama | Taslak — hukuk teyidi bekliyor |
 | 11 | [Personel verisi ve puantaj politikası](11-personel-puantaj-politikasi.md) | İK + hukuk | Taslak — Aşama 1B öncesi onaylanmalı |
+| 12 | [Kurulum ve işletim (üretim)](12-kurulum-isletim.md) | BT | Taslak |
 
 Şablon: [templates/misafir-import.xlsx](templates/misafir-import.xlsx) — başlıkları otomatik eşlemeyle birebir uyumlu (`scripts/make-import-template.ts` ile üretilir).
 Plan: [crmPlus_Uygulama_Plani_v4.pdf](crmPlus_Uygulama_Plani_v4.pdf).

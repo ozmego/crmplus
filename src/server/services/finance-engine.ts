@@ -89,6 +89,8 @@ export async function importStatement(user: Principal, a: { casinoId: string; pe
   if (a.data.length > MAX_FILE_BYTES) throw new FinanceError("FILE_TOO_LARGE");
   const scan = await scanBuffer(a.data);
   if (scan.status === "INFECTED") throw new FinanceError("INFECTED");
+  // Tarayıcı yanıt vermezse dosya taranmadan kabul edilmez (geliştirmede SKIPPED olabilir)
+  if (scan.status === "ERROR") throw new FinanceError("SCAN_FAILED");
   const casino = await db.casino.findUniqueOrThrow({ where: { id: a.casinoId } });
   const sheet = await parseFile(a.fileName, a.data).catch(() => {
     throw new FinanceError("PARSE_FAILED");

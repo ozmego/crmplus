@@ -44,6 +44,7 @@ const ERR: Record<string, string> = {
   BAD_PERIOD: "Dönem YYYY-AA biçiminde olmalı.",
   FILE_TOO_LARGE: "Dosya çok büyük.",
   INFECTED: "Dosya güvenlik taramasından geçmedi.",
+  SCAN_FAILED: "Dosya taranamadı (virüs tarayıcısına ulaşılamıyor); daha sonra tekrar deneyin.",
   PARSE_FAILED: "Dosya okunamadı (xlsx veya csv olmalı).",
   COLUMNS_MISSING: "Gerekli sütunlar bulunamadı (net kayıp ve CRM no veya oyuncu no).",
   DUPLICATE_STATEMENT: "Bu dosya bu casino için zaten yüklenmiş.",

@@ -12,7 +12,9 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
-  serverExternalPackages: ["@node-rs/argon2", "exceljs"],
+  // Docker imajı için yalnız gerekli dosyaları içeren bağımsız çıktı (.next/standalone)
+  output: "standalone",
+  serverExternalPackages: ["@node-rs/argon2", "exceljs", "bullmq", "ioredis"],
   // docs/02 §1: içe aktarma dosyaları en fazla 50 MB
   experimental: { serverActions: { bodySizeLimit: "52mb" } },
   async headers() {
