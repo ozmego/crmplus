@@ -32,7 +32,13 @@ if [ "$MODE" = "--test" ]; then
   trg=$(q "$T" "select count(*) from pg_trigger where tgname like '%append_only%'")
   echo "  değiştirilemezlik tetikleyicisi: $trg"
   [ "$trg" -ge 3 ] || FAIL=1
-  echo "Depo arşivi: $(tar -tzf "$DIR/storage.tar.gz" | wc -l) girdi"
+  # Arşiv stdin'den okunur (yolda "C:" gibi iki nokta tar'ı uzak sunucu sanmaya iter); okunamazsa test başarısız
+  if LIST=$(tar -tzf - < "$DIR/storage.tar.gz"); then
+    echo "Depo arşivi: $(printf '%s\n' "$LIST" | grep -c .) girdi"
+  else
+    echo "  Depo arşivi OKUNAMADI" >&2
+    FAIL=1
+  fi
   $COMPOSE exec -T postgres psql -U "$POSTGRES_USER" -d postgres -qc "DROP DATABASE $T"
   [ "$FAIL" -eq 0 ] && echo "GERİ YÜKLEME TESTİ BAŞARILI" || { echo "GERİ YÜKLEME TESTİ BAŞARISIZ" >&2; exit 1; }
   exit 0

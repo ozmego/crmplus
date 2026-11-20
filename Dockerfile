@@ -9,7 +9,11 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates tini \
   && rm -rf /var/lib/apt/lists/*
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH NEXT_TELEMETRY_DISABLED=1
-RUN corepack enable && corepack prepare pnpm@11.10.0 --activate
+# pnpm imaja gömülür: önbellek root'un ev dizininde kalırsa `node` kullanıcısı göremez ve pnpm'i çalışma anında
+# internetten indirmeye çalışır (dışarı erişimi kapalı sunucuda işçi ve göçler açılmaz)
+ENV COREPACK_HOME=/opt/corepack COREPACK_ENABLE_DOWNLOAD_PROMPT=0 COREPACK_ENABLE_NETWORK=0
+RUN COREPACK_ENABLE_NETWORK=1 corepack enable && COREPACK_ENABLE_NETWORK=1 corepack prepare pnpm@11.10.0 --activate \
+  && chmod -R a+rX /opt/corepack
 WORKDIR /app
 
 # ─── Bağımlılıklar ───

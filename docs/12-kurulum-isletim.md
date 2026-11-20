@@ -111,6 +111,32 @@ curl -fsS https://<alan>/api/health
 
 Göçler yalnız ileri yönlüdür; geri dönüş yedekten geri yüklemeyle yapılır.
 
+### 6a. Duman testi (canlıya geçişte ve her güncellemeden sonra)
+
+Duman testi canlı sunucuda değil, testi çalıştıran **bir bilgisayardan** çalışır (Node 22+, depo kopyası, `pnpm install`, Chrome).
+
+```bash
+SMOKE_BASE=https://crm.sirket.com.tr SMOKE_HTTP=http://crm.sirket.com.tr node scripts/smoke/prod-smoke.mjs
+# İlk kurulumda, ilk yönetici girişini de sınamak için (şifre değişimi + MFA kurulumu yapılır):
+SMOKE_EMAIL=… SMOKE_PASSWORD=<seed parolası> SMOKE_NEW_PASSWORD=<yeni parola> node scripts/smoke/prod-smoke.mjs
+# İç ağ sertifikasında: SMOKE_INSECURE=1
+```
+
+Duman testi şunları denetler:
+- sağlık ucu;
+- HSTS ve güvenlik başlıkları, HTTP → HTTPS yönlendirmesi;
+- girişsiz erişimin engellenmesi ve imzasız santral webhook'unun reddi;
+- yanlış şifrenin reddi ve oturum çerezinin özellikleri;
+- yönetim sayfalarının açılması.
+
+Testin tarayıcı akışında kurulan MFA sırrı yalnız test sırasında görünür. Bu yüzden yönetici, testten sonra MFA'yı kendi doğrulama uygulamasına yeniden kurar: Yönetim > Kullanıcılar > MFA sıfırla, ardından giriş yapar.
+
+**Virüs taraması** sunucuda, worker konteynerinde ayrıca sınanır. Temiz dosya `CLEAN`, EICAR test dizisi `INFECTED` dönmelidir:
+```bash
+docker compose --env-file .env.production cp scripts/smoke/scan-check.ts worker:/app/scripts/scan-check.ts
+docker compose --env-file .env.production exec worker node_modules/.bin/tsx --require ./src/worker/server-only-shim.cjs scripts/scan-check.ts
+```
+
 ## 7. İzleme
 
 - `GET /api/health` → 200 `{"status":"ok","checks":{"db":"ok","redis":"ok"}}`, sorun varsa 503. Kimlik istemez, yapılandırma bilgisi vermez.
@@ -132,6 +158,21 @@ Göçler yalnız ileri yönlüdür; geri dönüş yedekten geri yüklemeyle yap�
 - Caddy üzerinden HTTPS: `/api/health` 200, HSTS ve güvenlik başlıkları mevcut, HTTP → HTTPS yönlendirmesi.
 - Üretim imajında giriş: ilk girişte şifre değişimine yönlendirme; oturum çerezi `Secure`, `HttpOnly`, `SameSite=Strict`; yanlış şifre uyarısı.
 - `backup.sh` → `restore.sh --test` başarılı (tablo sayıları, göç kaydı, 3 değiştirilemezlik tetikleyicisi, depo arşivi); gerçek geri yükleme sonrası sonradan eklenen kayıt geri alındı, dosya deposu döndü, uygulama sağlıklı.
+
+**20 Kasım 2026 — canlıya geçiş öncesi tam test:**
+
+*Testler*
+- Tip denetimi ve lint temiz; 185 birim testi ve 13 uçtan uca testin hepsi geçti.
+- Temiz imajlarla kurulan yığında 16 göç uygulandı, seed çalıştı ve tüm servisler sağlıklı kalktı.
+
+*Sonuçlar*
+- **Duman testi:** 17 denetimin 17'si geçti (`scripts/smoke/prod-smoke.mjs`).
+- **Virüs taraması:** temiz dosya `CLEAN`, EICAR `INFECTED` döndü.
+- **Yedekleme ve test geri yüklemesi** başarılı. Bozuk depo arşivinde test artık doğru şekilde başarısız oluyor.
+
+*Düzeltmeler*
+- Worker imajı pnpm'i çalışma anında internetten indiriyordu (Corepack önbelleği root'taydı). Dışarı erişimi kapalı bir sunucuda worker ve göçler açılmazdı. Önbellek imaja gömüldü ve ağsız çalıştırmayla doğrulandı.
+- `restore.sh --test`, depo arşivi okunamadığında yine "başarılı" diyordu. Artık testi başarısız sayıyor.
 
 ## 8b. Performans ölçümü (20 Kasım 2026)
 
