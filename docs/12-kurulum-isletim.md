@@ -133,6 +133,29 @@ Göçler yalnız ileri yönlüdür; geri dönüş yedekten geri yüklemeyle yap�
 - Üretim imajında giriş: ilk girişte şifre değişimine yönlendirme; oturum çerezi `Secure`, `HttpOnly`, `SameSite=Strict`; yanlış şifre uyarısı.
 - `backup.sh` → `restore.sh --test` başarılı (tablo sayıları, göç kaydı, 3 değiştirilemezlik tetikleyicisi, depo arşivi); gerçek geri yükleme sonrası sonradan eklenen kayıt geri alındı, dosya deposu döndü, uygulama sağlıklı.
 
+## 8b. Performans ölçümü (20 Kasım 2026)
+
+Hedef (plan, Kapasite): 500 bin satırlık dosyada önizleme 3 dakikanın, uygulama 10 dakikanın altında kalmalı. Ölçüm araçları `scripts/perf/` altındadır: `gen-import.ts` sentetik dosya üretir, `import-bench.ts` yükleme → önizleme → karar → uygulama akışını çalıştırır, `normalize-bench.ts` satır başı işlem maliyetini ölçer. Ölçüm ayrı bir `crmplus_perf` veritabanında, geliştirici dizüstü bilgisayarında (Windows + Docker Desktop) yapıldı. Ölçüm sırasında sistemin uykuya geçmesi engellendi ve başka iş çalışmadı. Üretim sunucusu (16 vCPU) daha hızlı olmalıdır.
+
+| Senaryo | Önizleme | Uygulama | Tepe bellek |
+|---|---|---|---|
+| İlk yükleme: 500.000 yeni misafir | 1,6 dk | 4,6 dk | 2,0 GB |
+| Tekrar yükleme: 475.000 mevcut (47.500'ünde şehir değişmiş) + 25.000 yeni | 2,4 dk | 0,5 dk (toplu karar 3,4 sn dahil değil) | 2,4 GB |
+
+- Önizlemede en uzun adım satırların veritabanına yazılması (~71 sn). Sonra aday yükleme geliyor (güncelleme senaryosunda 9 + 29 sn).
+- Doğrulama: güncellenen her misafir için alan geçmişi yazıldı (47.500). İzin sayıları beklenenle tutuyor (350.000 + 17.500). `applied` kaydı boş satır kalmadı.
+- **İşçi belleği:** `NODE_OPTIONS=--max-old-space-size=6144`, ölçülen tepe değere pay bırakır (Dockerfile).
+
+**Bu ölçümü mümkün kılan değişiklikler:**
+- Yeni ve eşleşen satırlar 500–1000'lik sayfalarla toplu yazılıyor. Önceden satır satırdı ve tahmini süre yaklaşık 60 dakikaydı.
+- 18 eksik yabancı anahtar indeksi eklendi.
+- Aday misafirler önce yalnız kimlikle bulunuyor, sonra her biri bir kez yükleniyor.
+- Şifreleme anahtarı OpenSSL `KeyObject` olarak önbelleğe alındı (AES-GCM 50 → 10 µs, HMAC 32 → 4 µs).
+- Türkçe harf dönüşümü ICU olmadan yapılıyor; sonuçların ICU ile birebir aynı olduğu birim testiyle doğrulandı.
+- Önizleme satırları tek bir uzun veritabanı işlemi yerine parça parça yazılıyor; 120 saniyelik işlem zaman aşımı ortadan kalktı.
+
+**Henüz ölçülmeyen:** 500 bin satırlık bir içe aktarmanın **geri alınması** hâlâ satır satır yapılıyor. Büyük dosyalarda uzun sürer; toplu hale getirilmesi gerekiyor.
+
 ## 9. Bilinen sınırlar
 
 - Windows geliştirici makinesinde `next build` son adımda (standalone kopyalama) sembolik bağlantı izni yüzünden durabilir; üretim derlemesi Linux konteynerinde yapılır.
