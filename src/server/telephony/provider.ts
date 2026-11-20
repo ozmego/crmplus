@@ -1,5 +1,6 @@
 import "server-only";
 import { db } from "@/server/db";
+import { threecxProvider } from "@/server/telephony/threecx";
 
 /**
  * Santral soyutlaması (plan v4 §3). Aşama 1 hedefi bulut santral (3CX / SIP sağlayıcı):
@@ -7,7 +8,7 @@ import { db } from "@/server/db";
  * Santral yapılandırılmamışsa veya hata verirse "manual" yedeğe düşülür ve TelephonyIncident açılır.
  *
  * Ortam değişkenleri:
- *   PBX_PROVIDER       manual | pbx-http   (varsayılan manual)
+ *   PBX_PROVIDER       manual | pbx-http | 3cx   (varsayılan manual; 3cx ayarları threecx.ts)
  *   PBX_DIAL_URL       santralin "çağrı başlat" uç noktası (pbx-http)
  *   PBX_API_TOKEN      Bearer belirteç
  *   PBX_WEBHOOK_SECRET webhook imza sırrı (HMAC-SHA256)
@@ -58,8 +59,11 @@ export const httpPbxProvider: TelephonyProvider = {
 };
 
 export function configuredProvider(): TelephonyProvider {
+  if (process.env.PBX_PROVIDER === "3cx") return threecxProvider;
   return process.env.PBX_PROVIDER === "pbx-http" ? httpPbxProvider : manualProvider;
 }
+
+export const PBX_MODE_LABEL: Record<string, string> = { manual: "manuel (santral yapılandırılmamış)", "pbx-http": "bulut santral (genel HTTP)", "3cx": "3CX V20 (Call Control API)" };
 
 /** Santral ile ara; hata olursa manuel yedeğe düş ve olay kaydı aç. */
 export async function dialWithFallback(args: { e164: string; agentExtension?: string | null; callId: string }): Promise<DialResult> {

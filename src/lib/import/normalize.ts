@@ -61,17 +61,22 @@ const VIP_MAP: Record<string, string> = {
 
 const str = (v: unknown) => (v === null || v === undefined ? "" : String(v).trim());
 
+// Türkçe büyük/küçük harf: toLocale*Case("tr-TR") ICU üzerinden satır başına onlarca µs tutuyordu.
+// Türkçeye özgü fark yalnız I/ı ve İ/i çiftlerinde; gerisi standart dönüşümle aynıdır.
+export const trLower = (s: string) => (/[Iİ]/.test(s) ? s.replace(/I/g, "ı").replace(/İ/g, "i") : s).toLowerCase();
+export const trUpper = (s: string) => (s.includes("i") ? s.replace(/i/g, "İ") : s).toUpperCase();
+
 function titleCaseTr(s: string): string {
   return s
     .replace(/\s+/g, " ")
     .trim()
     .split(" ")
-    .map((w) => (w ? w.charAt(0).toLocaleUpperCase("tr-TR") + w.slice(1).toLocaleLowerCase("tr-TR") : w))
+    .map((w) => (w ? trUpper(w.charAt(0)) + trLower(w.slice(1)) : w))
     .join(" ");
 }
 
 function parseConsent(v: string): ConsentValue | null {
-  const s = v.toLocaleLowerCase("tr-TR");
+  const s = trLower(v);
   if (!s) return "UNKNOWN";
   if (["evet", "e", "yes", "y", "var", "1", "true", "onay", "izinli", "granted"].includes(s)) return "GRANTED";
   if (["hayır", "hayir", "h", "no", "n", "yok", "0", "false", "ret", "red", "denied"].includes(s)) return "DENIED";
@@ -101,6 +106,21 @@ export function parseDate(v: unknown): string | null {
   return null;
 }
 
+// Eşleme bütün dosya için aynıdır; alan → başlıklar dizini bir kez kurulur
+const headerIndex = new WeakMap<Mapping, Map<string, string[]>>();
+function headersByKey(mapping: Mapping): Map<string, string[]> {
+  let m = headerIndex.get(mapping);
+  if (!m) {
+    m = new Map();
+    for (const [h, k] of Object.entries(mapping)) {
+      if (!k) continue;
+      m.set(k, [...(m.get(k) ?? []), h]);
+    }
+    headerIndex.set(mapping, m);
+  }
+  return m;
+}
+
 export function normalizeRow(
   raw: Record<string, unknown>,
   mapping: Mapping,
@@ -108,10 +128,8 @@ export function normalizeRow(
 ): { row: NormalizedRow; issues: RowIssue[] } {
   const issues: RowIssue[] = [];
   const today = opts.today ?? new Date();
-  const get = (key: string): unknown[] =>
-    Object.entries(mapping)
-      .filter(([, k]) => k === key)
-      .map(([h]) => raw[h]);
+  const byKey = headersByKey(mapping);
+  const get = (key: string): unknown[] => (byKey.get(key) ?? []).map((h) => raw[h]);
   const one = (key: string) => str(get(key)[0]);
   const row: NormalizedRow = { phones: [], consent: {}, hasFinancial: get("financial").some((v) => str(v) !== "") };
 
@@ -143,7 +161,7 @@ export function normalizeRow(
 
   const country = one("country");
   if (country) {
-    const c = country.length === 2 ? country.toUpperCase() : COUNTRY_NAMES[country.toLocaleLowerCase("tr-TR")];
+    const c = country.length === 2 ? country.toUpperCase() : COUNTRY_NAMES[trLower(country)];
     if (c) row.country = c;
     else issues.push({ code: "E_ENUM", field: "country", message: `Ülke tanınmadı: ${country}`, severity: "warning" });
   }
@@ -169,7 +187,7 @@ export function normalizeRow(
     issues.push({ code: "E_REQUIRED", field: "phone1", message: "Geçerli telefon veya e-posta gerekli.", severity: "warning" });
   }
 
-  const lang = one("language").toLocaleLowerCase("tr-TR");
+  const lang = trLower(one("language"));
   if (lang) {
     const l = lang.length === 2 ? lang : LANG_NAMES[lang];
     if (l) row.language = l;
@@ -198,7 +216,7 @@ export function normalizeRow(
 
   const vip = one("vipLevel");
   if (vip) {
-    const v = VIP_MAP[vip.toLocaleLowerCase("tr-TR")];
+    const v = VIP_MAP[trLower(vip)];
     if (v) row.vipLevel = v;
     else issues.push({ code: "E_ENUM", field: "vipLevel", message: `VIP seviyesi tanınmadı: ${vip}`, severity: "warning" });
   }
@@ -213,7 +231,7 @@ export function normalizeRow(
 
   const consentCols = [["consentCall", "CALL"], ["consentSms", "SMS"], ["consentWhatsapp", "WHATSAPP"], ["consentEmail", "EMAIL"]] as const;
   for (const [field, ch] of consentCols) {
-    if (!Object.values(mapping).includes(field)) continue;
+    if (!byKey.has(field)) continue;
     const v = parseConsent(one(field));
     if (v === null) issues.push({ code: "E_ENUM", field, message: `İzin değeri tanınmadı: ${one(field)}`, severity: "warning" });
     else row.consent[ch] = v;

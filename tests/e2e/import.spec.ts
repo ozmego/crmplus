@@ -17,6 +17,13 @@ test("Excel içe aktarma: yükle → eşle → önizle → karar → uygula → 
   });
   const denied = await db.guest.findFirstOrThrow({ where: { consents: { some: { channel: "CALL", status: "DENIED" } } }, orderBy: { crmNo: "asc" } });
   const conflictGuest = await db.guest.findFirstOrThrow({ where: { id: { notIn: [granted.id, denied.id] } }, orderBy: { crmNo: "desc" } });
+  // Eşleşen misafire izin + yeni numara (toplu uygulama yolu: izin ekleme/güncelleme, telefon ekleme)
+  const consentGuest = await db.guest.findFirstOrThrow({
+    where: { id: { notIn: [granted.id, denied.id, conflictGuest.id] }, anonymizedAt: null, blocks: { none: {} }, consents: { none: { channel: "CALL", status: { in: ["GRANTED", "DENIED"] } } } },
+    orderBy: { crmNo: "asc" },
+  });
+  const consentBefore = await db.consentRecord.findUnique({ where: { guestId_channel: { guestId: consentGuest.id, channel: "CALL" } } });
+  const phoneCountBefore = await db.guestPhone.count({ where: { guestId: consentGuest.id } });
   const grantedPhone = decrypt(granted.phones[0].e164Enc);
   const stamp = Date.now().toString().slice(-6);
 
@@ -29,6 +36,7 @@ test("Excel içe aktarma: yükle → eşle → önizle → karar → uygula → 
   ws.addRow(["", "", "Eksik", "9.05E+11", "", "", "", "", ""]); // 5: ad yok + bozuk telefon → hatalı
   ws.addRow(["", "Test", `Yeni${stamp}`, `0532 9${stamp.slice(0, 2)} ${stamp.slice(2, 4)} ${stamp.slice(4, 6)}`, "İzmir", "", "", "", ""]); // 6: dosya içi mükerrer
   ws.addRow([`CRM-${denied.crmNo}`, denied.firstName, denied.lastName, "", "", "Evet", "01.06.2026", "Fuar formu", ""]); // 7: ret varken izin → inceleme
+  ws.addRow([`CRM-${consentGuest.crmNo}`, consentGuest.firstName, consentGuest.lastName, `0533 8${stamp.slice(0, 2)} ${stamp.slice(2, 4)} ${stamp.slice(4, 6)}`, "", "Evet", "01.06.2026", "Fuar formu", ""]); // 8: izin + yeni numara
   const buffer = Buffer.from(await wb.xlsx.writeBuffer());
 
   await firstLogin(page, "veri@crmplus.local");
@@ -71,6 +79,11 @@ test("Excel içe aktarma: yükle → eşle → önizle → karar → uygula → 
   const stillDenied = await db.consentRecord.findUniqueOrThrow({ where: { guestId_channel: { guestId: denied.id, channel: "CALL" } } });
   expect(stillDenied.status).toBe("DENIED"); // dosyadaki izin reti ezemez
   expect(await db.reviewItem.count({ where: { sourceRef: `import:${batch.id}`, kind: "CONSENT_CONFLICT" } })).toBe(1);
+  const newConsent = await db.consentRecord.findUniqueOrThrow({ where: { guestId_channel: { guestId: consentGuest.id, channel: "CALL" } } });
+  expect(newConsent).toMatchObject({ status: "GRANTED", sourceSystem: `import:${batch.id}`, source: "Fuar formu" });
+  expect(newConsent.grantedAt?.toISOString().slice(0, 10)).toBe("2026-06-01");
+  expect(await db.guestPhone.count({ where: { guestId: consentGuest.id } })).toBe(phoneCountBefore + 1);
+  expect(await db.consentHistory.count({ where: { guestId: consentGuest.id, source: `import:${batch.id}`, newStatus: "GRANTED" } })).toBe(1);
   const rowsJson = JSON.stringify(
     await db.importRow.findMany({ where: { batchId: batch.id }, select: { raw: true, normalized: true, errors: true, applied: true } }),
   );
@@ -106,4 +119,7 @@ test("Excel içe aktarma: yükle → eşle → önizle → karar → uygula → 
   expect(await db.guest.count({ where: { lastName: `Yeni${stamp}` } })).toBe(0);
   expect((await db.guest.findUniqueOrThrow({ where: { id: granted.id } })).city).toBeNull();
   expect((await db.guest.findUniqueOrThrow({ where: { id: conflictGuest.id } })).lastName).toBe(conflictGuest.lastName);
+  expect(await db.guestPhone.count({ where: { guestId: consentGuest.id } })).toBe(phoneCountBefore);
+  const consentAfter = await db.consentRecord.findUnique({ where: { guestId_channel: { guestId: consentGuest.id, channel: "CALL" } } });
+  expect(consentAfter?.status ?? null).toBe(consentBefore?.status ?? null);
 });

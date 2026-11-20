@@ -1,7 +1,8 @@
 import { requirePage } from "@/server/auth/rbac";
 import { db } from "@/server/db";
 import { gateOpen, getRecordingGate, getRetention } from "@/server/services/settings";
-import { isPbxMode } from "@/server/telephony/provider";
+import Link from "next/link";
+import { configuredProvider, PBX_MODE_LABEL } from "@/server/telephony/provider";
 import { GateForm, RetentionForm } from "@/components/admin-settings";
 
 export const dynamic = "force-dynamic";
@@ -40,7 +41,7 @@ export default async function SettingsPage() {
       <section className="card bg-white">
         <h2 className="card-title">Santral</h2>
         <p className="text-sm">
-          Mod: <b>{isPbxMode() ? "bulut santral (pbx-http)" : "manuel (santral yapılandırılmamış)"}</b>. Santral bağlantısı ortam değişkenleriyle yapılandırılır: PBX_PROVIDER, PBX_DIAL_URL, PBX_API_TOKEN, PBX_WEBHOOK_SECRET.
+          Mod: <b>{PBX_MODE_LABEL[configuredProvider().name]}</b>. Santral bağlantısı ortam değişkenleriyle yapılandırılır (PBX_PROVIDER; 3CX için THREECX_*). Bağlantı sınaması ve dahili numaralar: <Link href="/admin/integrations#threecx" className="text-teal-ink underline">Entegrasyonlar</Link>.
         </p>
         <h3 className="mt-3 text-sm font-semibold">Açık santral olayları</h3>
         {incidents.length === 0 ? (

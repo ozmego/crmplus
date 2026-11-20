@@ -74,6 +74,17 @@ export async function setUserTeam(actor: Principal, userId: string, teamId: stri
   await audit({ actorId: actor.id, action: "user.team", entity: "User", entityId: userId, reason, diff: { before: user.teamId, after: teamId } });
 }
 
+/** Santral dahili numarası (3CX makecall bu dahiliyi çaldırır). Aynı dahili iki etkin kullanıcıya verilemez. */
+export async function setUserExtension(actor: Principal, userId: string, extension: string | null, reason: string) {
+  const ext = extension?.trim() || null;
+  if (ext && !/^\d{2,8}$/.test(ext)) throw new UserAdminError("BAD_EXTENSION");
+  const user = await db.user.findUnique({ where: { id: userId } });
+  if (!user) throw new UserAdminError("NOT_FOUND");
+  if (ext && (await db.user.findFirst({ where: { extension: ext, status: "ACTIVE", NOT: { id: userId } } }))) throw new UserAdminError("EXTENSION_TAKEN");
+  await db.user.update({ where: { id: userId }, data: { extension: ext } });
+  await audit({ actorId: actor.id, action: "user.extension", entity: "User", entityId: userId, reason, diff: { before: user.extension, after: ext } });
+}
+
 export async function disableUser(actor: Principal, userId: string, reason: string) {
   if (userId === actor.id) throw new UserAdminError("SELF_DISABLE");
   await disableUserNow(userId, actor.id, reason);

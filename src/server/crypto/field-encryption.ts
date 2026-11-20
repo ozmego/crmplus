@@ -1,21 +1,24 @@
-import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, createSecretKey, randomBytes, type KeyObject } from "node:crypto";
 
 /**
  * Uygulama düzeyinde alan şifreleme (docs/07 §3).
  * Biçim: "v1:<iv b64>:<tag b64>:<ciphertext b64>" — anahtar sürümü önekte tutulur, rotasyon için.
  */
 
-// Anahtarlar her çağrıda yeniden çözülmez (toplu içe aktarmada yüz binlerce çağrı); ortam değişirse önbellek yenilenir
-const keyCache = new Map<string, { raw: string; buf: Buffer }>();
-function key(name: "FIELD_ENCRYPTION_KEY" | "BLIND_INDEX_KEY"): Buffer {
+// Anahtar süreç başına bir kez KeyObject olarak hazırlanır. Ham Buffer verilince OpenSSL 3 anahtarı her çağrıda
+// yeniden kurar: ölçümde HMAC 32 → 3,9 µs, AES-GCM 50 → 10 µs (500k satırlık içe aktarmada dakikalar).
+// Anahtar değişimi süreç yeniden başlatmasını gerektirir.
+const keyCache = new Map<string, KeyObject>();
+function key(name: "FIELD_ENCRYPTION_KEY" | "BLIND_INDEX_KEY"): KeyObject {
+  const hit = keyCache.get(name);
+  if (hit) return hit;
   const raw = process.env[name];
   if (!raw) throw new Error(`${name} tanımlı değil`);
-  const hit = keyCache.get(name);
-  if (hit && hit.raw === raw) return hit.buf;
   const buf = Buffer.from(raw, "base64");
   if (buf.length !== 32) throw new Error(`${name} 32 bayt olmalı`);
-  keyCache.set(name, { raw, buf });
-  return buf;
+  const k = createSecretKey(buf);
+  keyCache.set(name, k);
+  return k;
 }
 
 export function encrypt(plain: string): string {

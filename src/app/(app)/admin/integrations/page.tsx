@@ -5,7 +5,9 @@ import { iysMode } from "@/server/messaging/iys";
 import { phoneCheckApproval, phoneCheckMode } from "@/server/telephony/phone-validation";
 import { transferAssessment } from "@/server/services/whatsapp";
 import { FinanceForm } from "@/components/finance-form";
-import { phoneApprovalAction } from "./actions";
+import { configuredProvider, PBX_MODE_LABEL } from "@/server/telephony/provider";
+import { threecxConfig } from "@/server/telephony/threecx";
+import { extensionAction, phoneApprovalAction, testThreeCxAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -14,12 +16,14 @@ const t = (d: Date | null) => (d ? d.toLocaleString("tr-TR", { dateStyle: "short
 
 export default async function IntegrationsPage() {
   await requirePage("integration.manage");
-  const [iysCounts, outbox, q24, pc, wa] = await Promise.all([
+  const tcx = threecxConfig();
+  const [iysCounts, outbox, q24, pc, wa, staff] = await Promise.all([
     db.iysOutbox.groupBy({ by: ["status"], _count: true }),
     db.iysOutbox.findMany({ where: { status: { in: ["PENDING", "FAILED"] } }, orderBy: { createdAt: "asc" }, take: 50 }),
     db.iysQueryLog.groupBy({ by: ["result"], where: { at: { gte: new Date(Date.now() - 86_400_000) } }, _count: true }),
     phoneCheckApproval(),
     transferAssessment(),
+    db.user.findMany({ where: { status: "ACTIVE" }, orderBy: { name: "asc" }, select: { id: true, name: true, extension: true } }),
   ]);
   const guests = new Map((await db.guest.findMany({ where: { id: { in: outbox.map((o) => o.guestId) } }, select: { id: true, crmNo: true } })).map((g) => [g.id, g.crmNo]));
   const cnt = Object.fromEntries(iysCounts.map((c) => [c.status, c._count])) as Record<string, number>;
@@ -32,6 +36,36 @@ export default async function IntegrationsPage() {
         <h1 className="page-title">Dış servisler</h1>
         <p className="mt-1 text-sm text-muted">Sağlayıcı anahtarları ortam değişkenlerindedir ve ekranda gösterilmez. Her dış servis, veri aktarımı onaylanmadan veya bağlantı kurulmadan güvenli varsayılanla çalışır (gönderim yok).</p>
       </div>
+
+      <section className="card" id="threecx" data-testid="threecx">
+        <h2 className="card-title">Santral — 3CX</h2>
+        <p className="text-sm">
+          Mod: <b>{PBX_MODE_LABEL[configuredProvider().name]}</b>
+          {tcx.configured ? <> · adres <span className="font-mono text-xs">{tcx.url.replace(/^https?:\/\//, "")}</span> · numara biçimi {tcx.format}</> : <> · 3CX ayarları girilmemiş</>}.
+          {" "}“Ara”ya basınca 3CX önce temsilcinin dahilisini çaldırır, temsilci açınca misafiri arar; bağlanma ve bitiş anları 3CX olay akışından (işçi) yazılır. Santral hata verirse arama manuel moda düşer ve olay kaydı açılır.
+        </p>
+        <div className="mt-3"><FinanceForm action={testThreeCxAction} submit="Bağlantıyı sına" tone="secondary" inline fields={[]} /></div>
+        <h3 className="mt-4 text-sm font-semibold">Temsilci dahili numaraları</h3>
+        <table className="table-ink mt-2">
+          <thead><tr><th>Kullanıcı</th><th>Dahili</th></tr></thead>
+          <tbody>
+            {staff.filter((s) => s.extension).map((s) => <tr key={s.id}><td>{s.name}</td><td className="tabular-nums">{s.extension}</td></tr>)}
+            {!staff.some((s) => s.extension) && <tr><td colSpan={2} className="text-muted">Dahili atanmış kullanıcı yok.</td></tr>}
+          </tbody>
+        </table>
+        <div className="mt-3">
+          <FinanceForm
+            action={extensionAction}
+            submit="Dahiliyi kaydet"
+            inline
+            fields={[
+              { name: "userId", label: "Kullanıcı", type: "select", required: true, options: staff.map((s) => ({ value: s.id, label: `${s.name}${s.extension ? ` (${s.extension})` : ""}` })) },
+              { name: "extension", label: "Dahili (boş = kaldır)", placeholder: "101" },
+              { name: "reason", label: "Gerekçe", required: true },
+            ]}
+          />
+        </div>
+      </section>
 
       <section className="card" data-testid="iys">
         <h2 className="card-title">İYS — İleti Yönetim Sistemi</h2>

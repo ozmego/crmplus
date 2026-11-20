@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { suggestMapping } from "@/lib/import/fields";
-import { normalizeRow, parseDate } from "@/lib/import/normalize";
+import { normalizeRow, parseDate, trLower, trUpper } from "@/lib/import/normalize";
 import { classifyMatch, fieldDiff, trigramSimilarity, type Candidate } from "@/lib/import/match";
+
+describe("trLower / trUpper", () => {
+  it("ICU tr-TR dönüşümüyle aynı sonucu verir (Latin, Kiril, Yunan harfleri ve örnekler)", () => {
+    const chars: string[] = [];
+    for (let c = 0x41; c <= 0x24f; c++) chars.push(String.fromCharCode(c));
+    for (let c = 0x370; c <= 0x4ff; c++) chars.push(String.fromCharCode(c));
+    const samples = [...chars, "IŞIK", "İSTANBUL", "ılık İçel", "ŞÜKRÜ ÇAĞLAR", "Müller", "STRAßE", "i̇", "ÖzİşIı", "Иван", "ΣΟΦΊΑ"];
+    for (const s of samples) {
+      expect(trLower(s), s).toBe(s.toLocaleLowerCase("tr-TR"));
+      expect(trUpper(s), s).toBe(s.toLocaleUpperCase("tr-TR"));
+    }
+  });
+});
 
 describe("suggestMapping", () => {
   it("Türkçe ve İngilizce başlıkları alanlara eşler, finansal sütunu tanır", () => {

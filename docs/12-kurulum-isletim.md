@@ -37,6 +37,44 @@ curl -fsS https://crm.sirket.com.tr/api/health                                  
 - ClamAV ilk açılışta imza indirir (birkaç dakika); bu sürede dosya yükleme “taranamadı” hatası verir — bilinçli olarak taranmamış dosya kabul edilmez.
 - İç ağ kurulumunda (`CRMPLUS_TLS=internal`) Caddy'nin kök sertifikası (`caddy-data` birimi → `/data/caddy/pki/authorities/local/root.crt`) istemci bilgisayarlara güvenilir kök olarak dağıtılır.
 
+## 3a. Santral — 3CX V20
+
+crmPlus, 3CX'e **Call Control API** ile bağlanır. Arama `POST /callcontrol/{dahili}/makecall` ile başlatılır: 3CX önce temsilcinin dahilisini çaldırır, temsilci açınca misafiri arar. Numara tarayıcıya gönderilmez. 3CX webhook göndermez; bağlanma ve bitiş anları işçideki dinleyicinin `/callcontrol/ws` olay akışından okunur. Bu yüzden **worker hizmeti çalışmıyorsa süreler yazılmaz**. Santraldeki diğer çağrılar yok sayılır, yalnız crmPlus'ın başlattığı çağrılar işlenir.
+
+1. **Lisans:** Call Control API, 3CX V20'nin Enterprise lisansında açılır (sürüm ve lisans 3CX yöneticisiyle teyit edilir).
+2. **3CX yönetim konsolu > Entegrasyonlar > API > Ekle:**
+   - "3CX Call Control API erişimi"ni açın.
+   - İzlenecek dahililer olarak tüm temsilci dahililerini seçin.
+   - Oluşan istemci kimliğini ve API anahtarını kaydedin. Anahtar yalnız bir kez gösterilir.
+3. **`.env.production` içine:**
+   ```
+   PBX_PROVIDER=3cx
+   THREECX_URL=https://firma.3cx.com.tr
+   THREECX_CLIENT_ID=<istemci kimliği>
+   THREECX_CLIENT_SECRET=<API anahtarı>
+   THREECX_DIAL_FORMAT=e164
+   ```
+   `THREECX_DIAL_FORMAT` santralin giden arama kuralına göre seçilir: `e164` (+90532…), `00` (0090532…) veya `national` (0532…).
+4. `docker compose --env-file .env.production up -d app worker` ile hizmetleri yeniden başlatın. Worker günlüğünde `[3cx] olay akışına bağlanıldı` satırı görünmelidir.
+5. **crmPlus > Yönetim > Entegrasyonlar > Santral — 3CX:**
+   - Her temsilciye dahili numarasını gerekçeyle atayın.
+   - **Bağlantıyı sına** düğmesine basın. Sınama belirteç alır ve dahili listesini okur; arama başlatmaz. API istemcisinde izlenmeyen dahililer ayrıca listelenir.
+6. **Canlı deneme:** bir test misafiriyle tek arama yapın. Çağrı kaydında `santral 3cx`, bağlanma ve bitiş anları ile konuşma süresi görünmelidir.
+
+**Hata durumları:**
+- 3CX yanıt vermezse veya kimlik reddedilirse arama **manuel moda düşer** ve `DIAL_FAILED` olayı açılır (Yönetim > Ayarlar > Santral).
+- Olay akışı koparsa worker artan beklemeyle yeniden bağlanır; her denemede belirteci yeniler. Üçüncü başarısızlıkta bir kez `EVENTS_DISCONNECTED`, bağlantı geri gelince `EVENTS_RESTORED` olayı yazılır. Kopukluk sırasında biten çağrıların süreleri boş kalır; temsilci sonuç kodunu yine girer.
+
+**Geliştirmede sahte santral:**
+```bash
+node scripts/dev/fake-3cx.mjs   # http://127.0.0.1:5090 · istemci crmplus / secret · dahililer 101, 102
+```
+Arama ve olay akışını uçtan uca dener: Dialing → 3 sn sonra Connected → 6 sn sonra kapanış. Numara 0000 ile bitiyorsa misafir açmaz. `scripts/dev/try-3cx-call.ts` bir temsilcinin açık görevinden arama başlatıp süreleri izler. Bu betik yalnız geliştirme veritabanı içindir: temsilcinin açık çağrılarını kapatır.
+
+**Henüz yok:**
+- 3CX ses kayıtlarının crmPlus'a çekilmesi (XAPI `Recordings`). Kayıt akışı şimdilik genel santral webhook'u (`recording.ready`) üzerinden çalışıyor.
+- Çağrı geçmişinden (CDR) süre mutabakatı.
+
 ## 4. Anahtarlar ve gizli değerler
 
 | Değer | Kaybolursa |
@@ -45,6 +83,7 @@ curl -fsS https://crm.sirket.com.tr/api/health                                  
 | `BLIND_INDEX_KEY` | Telefon/e-posta ile eşleme ve arama çalışmaz |
 | `POSTGRES_PASSWORD`, `REDIS_PASSWORD` | Değiştirilebilir (servisleri yeniden başlatın) |
 | Webhook sırları (`PBX_`, `SMS_`, `WA_APP_SECRET`) | Sağlayıcı panelinde yenilenir |
+| `THREECX_CLIENT_SECRET` | 3CX konsolunda API istemcisi için yeni anahtar üretilir; worker ve app yeniden başlatılır |
 
 `.env.production` yedeklere **dahil edilmez**; ayrı, erişimi kısıtlı bir kasada (parola yöneticisi / HSM) saklanır. Anahtar rotasyonu Aşama sonrası iştir (tüm şifreli alanların yeniden şifrelenmesi gerekir).
 

@@ -26,10 +26,16 @@ test("Aşama 2 operasyon: dış servis onayı → hat durumu sorgusu (kesin değ
   const admin = await page("e2e-admin-i@crmplus.local");
   await admin.goto("/admin/integrations");
   await expect(admin.getByTestId("iys")).toContainText("bağlı değil");
-  await admin.getByLabel("İnceleme tarihi").fill("2026-11-01");
-  await admin.getByLabel("Belge referansı").fill("GUV-HUK-2026-11");
-  await admin.getByLabel("Gerekçe", { exact: true }).fill("Sağlayıcı sözleşmesi ve veri işleme eki onaylandı");
-  await admin.getByRole("button", { name: "Onayı kaydet" }).click();
+  // 3CX kartı: santral yapılandırılmamış, sınama anlaşılır hata verir
+  const pbx = admin.getByTestId("threecx");
+  await expect(pbx).toContainText("3CX ayarları girilmemiş");
+  await pbx.getByRole("button", { name: "Bağlantıyı sına" }).click();
+  await expect(pbx).toContainText("3CX yapılandırılmamış");
+  const pc = admin.getByTestId("phone-check");
+  await pc.getByLabel("İnceleme tarihi").fill("2026-11-01");
+  await pc.getByLabel("Belge referansı").fill("GUV-HUK-2026-11");
+  await pc.getByLabel("Gerekçe", { exact: true }).fill("Sağlayıcı sözleşmesi ve veri işleme eki onaylandı");
+  await pc.getByRole("button", { name: "Onayı kaydet" }).click();
   await expect(admin.getByTestId("phone-check")).toContainText("GUV-HUK-2026-11");
 
   // 2. Operasyon: misafir kartından hat sorgusu → kaynak ve güvenle kanıt, “kesin değildir”

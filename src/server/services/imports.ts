@@ -234,35 +234,48 @@ export async function buildPreview(user: Principal, batchId: string) {
   } satisfies Prisma.GuestSelect;
   const chunk = <T,>(arr: T[], n = 1000) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n));
 
-  const guestsById = new Map<string, Prisma.GuestGetPayload<{ select: typeof select }>>();
+  // 1) Yalnız kimlikler (hafif SQL, = ANY(dizi)); 2) her aday misafir bir kez, ilişkileriyle
+  const addTo = <K,>(m: Map<K, string[]>, k: K, id: string) => {
+    const cur = m.get(k);
+    if (!cur) m.set(k, [id]);
+    else if (!cur.includes(id)) cur.push(id);
+  };
+  const ids = new Set<string>();
   const byCrm = new Map<number, string>();
-  for (const part of chunk(crmNos)) {
-    for (const g of await db.guest.findMany({ where: { crmNo: { in: part }, anonymizedAt: null }, select })) {
-      guestsById.set(g.id, g);
-      byCrm.set(g.crmNo, g.id);
+  for (const part of chunk(crmNos, 10_000)) {
+    const found = await db.$queryRaw<{ id: string; crmNo: number }[]>`SELECT id, "crmNo" FROM public."Guest" WHERE "crmNo" = ANY(${part}::int[]) AND "anonymizedAt" IS NULL`;
+    for (const f of found) {
+      byCrm.set(f.crmNo, f.id);
+      ids.add(f.id);
     }
   }
   const byExt = new Map<string, string[]>();
-  // Kaynak bazında `value IN (...)`: (source, value) indeksini kullanır (çok sayıda OR çifti planlayıcıyı yavaşlatıyordu)
-  const valuesBySource = new Map<string, string[]>();
-  for (const e of exts) valuesBySource.set(e.source, [...(valuesBySource.get(e.source) ?? []), e.value]);
+  const valuesBySource = new Map<string, Set<string>>();
+  for (const e of exts) {
+    if (!valuesBySource.has(e.source)) valuesBySource.set(e.source, new Set());
+    valuesBySource.get(e.source)!.add(e.value);
+  }
   for (const [source, values] of valuesBySource) {
-    for (const part of chunk([...new Set(values)])) {
-      const found = await db.guestExternalId.findMany({ where: { source, value: { in: part } }, select: { source: true, value: true, guest: { select } } });
+    for (const part of chunk([...values], 10_000)) {
+      const found = await db.$queryRaw<{ value: string; guestId: string }[]>`SELECT e.value, e."guestId" FROM public."GuestExternalId" e JOIN public."Guest" g ON g.id = e."guestId" WHERE e.source = ${source} AND e.value = ANY(${part}::text[]) AND g."anonymizedAt" IS NULL`;
       for (const f of found) {
-        guestsById.set(f.guest.id, f.guest);
-        const k = `${f.source}\u0000${f.value}`;
-        byExt.set(k, [...(byExt.get(k) ?? []), f.guest.id]);
+        addTo(byExt, `${source}\u0000${f.value}`, f.guestId);
+        ids.add(f.guestId);
       }
     }
   }
   const byPhone = new Map<string, string[]>();
-  for (const part of chunk(hashes)) {
-    const found = await db.guestPhone.findMany({ where: { phoneHash: { in: part }, guest: { anonymizedAt: null } }, select: { phoneHash: true, guest: { select } } });
+  for (const part of chunk(hashes, 10_000)) {
+    const found = await db.$queryRaw<{ phoneHash: string; guestId: string }[]>`SELECT p."phoneHash", p."guestId" FROM public."GuestPhone" p JOIN public."Guest" g ON g.id = p."guestId" WHERE p."phoneHash" = ANY(${part}::text[]) AND g."anonymizedAt" IS NULL`;
     for (const f of found) {
-      guestsById.set(f.guest.id, f.guest);
-      byPhone.set(f.phoneHash, [...new Set([...(byPhone.get(f.phoneHash) ?? []), f.guest.id])]);
+      addTo(byPhone, f.phoneHash, f.guestId);
+      ids.add(f.guestId);
     }
+  }
+  lap(`aday kimlikleri (${ids.size})`);
+  const guestsById = new Map<string, Prisma.GuestGetPayload<{ select: typeof select }>>();
+  for (const part of chunk([...ids], 5000)) {
+    for (const g of await db.guest.findMany({ where: { id: { in: part } }, select })) guestsById.set(g.id, g);
   }
 
   lap("aday yükleme");
@@ -354,10 +367,15 @@ export async function buildPreview(user: Principal, batchId: string) {
     sheets: (b.summary as { sheets?: string[] } | null)?.sheets ?? [],
   };
 
-  await db.$transaction(async (tx) => {
-    await tx.importRow.deleteMany({ where: { batchId: b.id } });
+  // Tek uzun işlem yerine: önce MAPPED'e dön ve eski satırları sil (yarım kalırsa önizleme yok sayılır),
+  // satırları parça parça yaz, en son PREVIEWED. 500k satır tek işlemde zaman aşımına uğruyordu.
+  await db.$transaction([
+    db.importBatch.update({ where: { id: b.id }, data: { status: "MAPPED" } }),
+    db.importRow.deleteMany({ where: { batchId: b.id } }),
+  ]);
+  {
     for (const part of chunk(results, 2000)) {
-      await tx.importRow.createMany({
+      await db.importRow.createMany({
         data: part.map((r) => ({
           batchId: b.id,
           rowNo: r.rowNo,
@@ -369,8 +387,8 @@ export async function buildPreview(user: Principal, batchId: string) {
         })),
       });
     }
-    await tx.importBatch.update({ where: { id: b.id }, data: { status: "PREVIEWED", summary } });
-  }, { timeout: 120_000, maxWait: 30_000 });
+    await db.importBatch.update({ where: { id: b.id }, data: { status: "PREVIEWED", summary } });
+  }
   lap("satırların yazılması");
   await audit({ actorId: user.id, action: "import.preview", entity: "ImportBatch", entityId: b.id, diff: summary });
   return summary;
@@ -455,105 +473,161 @@ export async function applyImport(user: Principal, batchId: string) {
     stats.consents += r.consents;
   }
 
-  // 2) Eşleşen, çakışan ve incelemeye düşen satırlar: alan bazında karar gerektiği için satır satır
-  const rows = await db.importRow.findMany({ where: { batchId, result: { in: ["MATCHED", "CONFLICT", "POSSIBLE", "MULTI_MATCH"] } }, orderBy: { rowNo: "asc" } });
-  for (let i = 0; i < rows.length; i += 100) {
-    const part = rows.slice(i, i + 100);
-    await db.$transaction(async (tx) => {
-      for (const row of part) {
-        const s = row.normalized as unknown as StoredRow;
-        const applied: Record<string, unknown> = {};
-
-        if (row.result === "POSSIBLE" || row.result === "MULTI_MATCH") {
-          await tx.reviewItem.create({
-            data: {
-              kind: row.result === "POSSIBLE" ? "POSSIBLE_DUPLICATE" : "MULTI_MATCH",
-              candidates: s.match?.candidateIds ?? [],
-              payload: {
-                rowNo: row.rowNo,
-                incoming: { ...s.fields, phones: s.phones.map((p) => p.masked).filter((m): m is string => !!m) },
-                reason: s.match?.reason ?? null,
-              } as Prisma.InputJsonValue,
-              sourceRef: source,
-            },
-          });
-          stats.review++;
-          await tx.importRow.update({ where: { id: row.id }, data: { applied: { review: true } } });
-          continue;
-        }
-
-        // MATCHED / CONFLICT
-        const guestId = row.guestId!;
-        const decisions = (row.decisions as Record<string, Decision> | null) ?? {};
-        const guest = await tx.guest.findUniqueOrThrow({ where: { id: guestId } });
-        const update: Prisma.GuestUpdateInput = {};
-        const fieldSources = { ...((guest.fieldSources as Record<string, unknown>) ?? {}) };
-        const changedFields: { field: string; old: string | null; new: string }[] = [];
-        for (const c of s.changes ?? []) {
-          const d = c.action === "FILL" ? "USE_NEW" : decisions[c.field];
-          if (d === "USE_NEW") {
-            (update as Record<string, unknown>)[c.field] = c.field === "birthYear" ? Number(c.new) : c.new;
-            fieldSources[c.field] = { source, at: now.toISOString() };
-            changedFields.push({ field: c.field, old: c.old, new: c.new });
-            await tx.fieldHistory.create({ data: { guestId, field: c.field, oldValue: c.old, newValue: c.new, importBatchId: b.id, sourceId: source, actorId: user.id } });
-          } else if (d === "REVIEW") {
-            await tx.reviewItem.create({
-              data: { kind: "FIELD_CONFLICT", guestId, candidates: [guestId], payload: { field: c.field, current: c.old, incoming: c.new, rowNo: row.rowNo }, sourceRef: source },
-            });
-            stats.review++;
-          }
-        }
-        if (changedFields.length) {
-          update.fieldSources = fieldSources as Prisma.InputJsonValue;
-          await tx.guest.update({ where: { id: guestId }, data: update });
-          stats.updated++;
-        }
-        const phonesAdded: string[] = [];
-        for (const idx of s.addPhones ?? []) {
-          const p = s.phones[idx];
-          if (!p?.ok || !p.e164Enc) continue;
-          const created = await tx.guestPhone.create({
-            data: { guestId, e164Enc: p.e164Enc, phoneHash: p.hash!, masked: p.masked!, country: p.country, lineType: p.lineType, isPrimary: false, formatStatus: p.countryMismatch ? "COUNTRY_MISMATCH" : "VALID", lastCheckedAt: now },
-          });
-          await tx.fieldHistory.create({ data: { guestId, field: "phone", oldValue: null, newValue: p.masked ?? null, importBatchId: b.id, sourceId: source, actorId: user.id } });
-          phonesAdded.push(created.id);
-          stats.phonesAdded++;
-        }
-        const consentsApplied: { channel: string; from: string | null; to: string }[] = [];
-        for (const cp of s.consentPlan ?? []) {
-          if (cp.action === "CONFLICT") {
-            await tx.reviewItem.create({
-              data: { kind: "CONSENT_CONFLICT", guestId, candidates: [guestId], payload: { channel: cp.channel, current: cp.from, incoming: cp.to, rowNo: row.rowNo }, sourceRef: source },
-            });
-            stats.review++;
-            continue;
-          }
-          await tx.consentRecord.upsert({
-            where: { guestId_channel: { guestId, channel: cp.channel as "CALL" } },
-            update: {
-              status: cp.to as "GRANTED", source: s.consentSource, sourceSystem: source, proofRef: s.consentProofRef, updatedBy: user.id,
-              ...(cp.to === "GRANTED" ? { grantedAt: new Date(s.consentDate!) } : { deniedAt: now }),
-            },
-            create: {
-              guestId, channel: cp.channel as "CALL", status: cp.to as "GRANTED", source: s.consentSource, sourceSystem: source, proofRef: s.consentProofRef, updatedBy: user.id,
-              grantedAt: cp.to === "GRANTED" ? new Date(s.consentDate!) : null, deniedAt: cp.to === "DENIED" ? now : null,
-            },
-          });
-          await tx.consentHistory.create({ data: { guestId, channel: cp.channel, oldStatus: cp.from, newStatus: cp.to, source, actorId: user.id } });
-          consentsApplied.push({ channel: cp.channel, from: cp.from, to: cp.to });
-          stats.consents++;
-        }
-        await tx.importRow.update({
-          where: { id: row.id },
-          data: { applied: { guestId, fields: changedFields, phonesAdded, consents: consentsApplied } as Prisma.InputJsonValue },
-        });
-      }
-    }, { timeout: 120_000, maxWait: 30_000 });
+  // 2) Eşleşen, çakışan ve incelemeye düşen satırlar: alan bazında kararlar uygulanır, yazım sayfa başına toplu
+  let mcursor: bigint | undefined;
+  for (;;) {
+    const part = await db.importRow.findMany({
+      where: { batchId, result: { in: ["MATCHED", "CONFLICT", "POSSIBLE", "MULTI_MATCH"] }, ...(mcursor ? { id: { gt: mcursor } } : {}) },
+      orderBy: { id: "asc" },
+      take: 500,
+      select: { id: true, rowNo: true, result: true, guestId: true, normalized: true, decisions: true },
+    });
+    if (!part.length) break;
+    mcursor = part[part.length - 1].id;
+    const r = await db.$transaction(
+      (tx) => applyMatchedBatch(tx, part, { actorId: user.id, source, batchId: b.id, now }),
+      { timeout: 120_000, maxWait: 30_000 },
+    );
+    for (const k of Object.keys(r) as (keyof typeof r)[]) stats[k] += r[k];
   }
 
   const summary = { ...((b.summary as object) ?? {}), applied: stats, job: null, jobError: null };
   await db.importBatch.update({ where: { id: b.id }, data: { status: "APPLIED", appliedAt: now, summary } });
   await audit({ actorId: user.id, action: "import.apply", entity: "ImportBatch", entityId: b.id, diff: stats });
+  return stats;
+}
+
+/**
+ * Eşleşen/çakışan/incelemeye düşen satırların toplu uygulanması. Satır satır uygulamayla aynı sonucu üretir:
+ * yalnız USE_NEW (veya boş alanı doldurma) kararlı alanlar yazılır, REVIEW kararı ve izin çakışması inceleme kaydı açar,
+ * aynı misafire aynı sayfada iki satır düşerse sonraki satır öncekinin üzerine uygulanır.
+ */
+async function applyMatchedBatch(
+  tx: Prisma.TransactionClient,
+  rows: { id: bigint; rowNo: number; result: string | null; guestId: string | null; normalized: Prisma.JsonValue; decisions: Prisma.JsonValue }[],
+  ctx: { actorId: string; source: string; batchId: string; now: Date },
+) {
+  const { actorId, source, batchId, now } = ctx;
+  const stats = { created: 0, updated: 0, review: 0, phonesAdded: 0, consents: 0 };
+  const reviews: Prisma.ReviewItemCreateManyInput[] = [];
+  const histories: Prisma.FieldHistoryCreateManyInput[] = [];
+  const phones: Prisma.GuestPhoneCreateManyInput[] = [];
+  const consentHist: Prisma.ConsentHistoryCreateManyInput[] = [];
+  const consentUpserts = new Map<string, { id: string; gid: string; ch: string; st: string; src: string | null; proof: string | null; ga: string | null; da: string | null }>();
+  const applied: { id: bigint; json: string }[] = [];
+  const guestSets = new Map<string, Record<string, string>>();
+
+  const gids = [...new Set(rows.filter((r) => r.guestId && (r.result === "MATCHED" || r.result === "CONFLICT")).map((r) => r.guestId!))];
+  const fsById = new Map(
+    (await tx.guest.findMany({ where: { id: { in: gids } }, select: { id: true, fieldSources: true } })).map((g) => [g.id, { ...((g.fieldSources as Record<string, unknown>) ?? {}) }]),
+  );
+  const newId = (p: string) => `${p}${randomUUID().replace(/-/g, "").slice(0, 24)}`;
+
+  for (const row of rows) {
+    const s = row.normalized as unknown as StoredRow;
+    if (row.result === "POSSIBLE" || row.result === "MULTI_MATCH") {
+      reviews.push({
+        kind: row.result === "POSSIBLE" ? "POSSIBLE_DUPLICATE" : "MULTI_MATCH",
+        candidates: s.match?.candidateIds ?? [],
+        payload: { rowNo: row.rowNo, incoming: { ...s.fields, phones: s.phones.map((p) => p.masked).filter((m): m is string => !!m) }, reason: s.match?.reason ?? null } as Prisma.InputJsonValue,
+        sourceRef: source,
+      });
+      stats.review++;
+      applied.push({ id: row.id, json: JSON.stringify({ review: true }) });
+      continue;
+    }
+
+    const guestId = row.guestId!;
+    const decisions = (row.decisions as Record<string, Decision> | null) ?? {};
+    const fieldSources = fsById.get(guestId);
+    if (!fieldSources) throw new ImportError("GUEST_NOT_FOUND", guestId);
+    const set = guestSets.get(guestId) ?? {};
+    const changedFields: { field: string; old: string | null; new: string }[] = [];
+    for (const c of s.changes ?? []) {
+      const d = c.action === "FILL" ? "USE_NEW" : decisions[c.field];
+      if (d === "USE_NEW") {
+        set[c.field] = c.new;
+        fieldSources[c.field] = { source, at: now.toISOString() };
+        changedFields.push({ field: c.field, old: c.old, new: c.new });
+        histories.push({ guestId, field: c.field, oldValue: c.old, newValue: c.new, importBatchId: batchId, sourceId: source, actorId });
+      } else if (d === "REVIEW") {
+        reviews.push({ kind: "FIELD_CONFLICT", guestId, candidates: [guestId], payload: { field: c.field, current: c.old, incoming: c.new, rowNo: row.rowNo }, sourceRef: source });
+        stats.review++;
+      }
+    }
+    if (changedFields.length) {
+      guestSets.set(guestId, set);
+      stats.updated++;
+    }
+    const phonesAdded: string[] = [];
+    for (const idx of s.addPhones ?? []) {
+      const p = s.phones[idx];
+      if (!p?.ok || !p.e164Enc) continue;
+      const id = newId("p");
+      phones.push({ id, guestId, e164Enc: p.e164Enc, phoneHash: p.hash!, masked: p.masked!, country: p.country, lineType: p.lineType, isPrimary: false, formatStatus: p.countryMismatch ? "COUNTRY_MISMATCH" : "VALID", lastCheckedAt: now });
+      histories.push({ guestId, field: "phone", oldValue: null, newValue: p.masked ?? null, importBatchId: batchId, sourceId: source, actorId });
+      phonesAdded.push(id);
+      stats.phonesAdded++;
+    }
+    const consentsApplied: { channel: string; from: string | null; to: string }[] = [];
+    for (const cp of s.consentPlan ?? []) {
+      if (cp.action === "CONFLICT") {
+        reviews.push({ kind: "CONSENT_CONFLICT", guestId, candidates: [guestId], payload: { channel: cp.channel, current: cp.from, incoming: cp.to, rowNo: row.rowNo }, sourceRef: source });
+        stats.review++;
+        continue;
+      }
+      consentUpserts.set(`${guestId}:${cp.channel}`, {
+        id: newId("c"), gid: guestId, ch: cp.channel, st: cp.to, src: s.consentSource ?? null, proof: s.consentProofRef ?? null,
+        ga: cp.to === "GRANTED" ? new Date(s.consentDate!).toISOString() : null, da: cp.to === "DENIED" ? now.toISOString() : null,
+      });
+      consentHist.push({ guestId, channel: cp.channel, oldStatus: cp.from, newStatus: cp.to, source, actorId });
+      consentsApplied.push({ channel: cp.channel, from: cp.from, to: cp.to });
+      stats.consents++;
+    }
+    applied.push({ id: row.id, json: JSON.stringify({ guestId, fields: changedFields, phonesAdded, consents: consentsApplied }) });
+  }
+
+  if (guestSets.size) {
+    const ids = [...guestSets.keys()];
+    await tx.$executeRaw`
+      UPDATE public."Guest" AS g SET
+        "firstName" = COALESCE(v.d->>'firstName', g."firstName"),
+        "lastName"  = COALESCE(v.d->>'lastName', g."lastName"),
+        "language"  = COALESCE(v.d->>'language', g."language"),
+        "country"   = COALESCE(v.d->>'country', g."country"),
+        "city"      = COALESCE(v.d->>'city', g."city"),
+        "birthYear" = COALESCE((v.d->>'birthYear')::int, g."birthYear"),
+        "vipLevel"  = COALESCE(v.d->>'vipLevel', g."vipLevel"),
+        "fieldSources" = v.fs,
+        "updatedAt" = now()
+      FROM unnest(${ids}::text[], ${ids.map((id) => JSON.stringify(guestSets.get(id)))}::text[]::jsonb[], ${ids.map((id) => JSON.stringify(fsById.get(id)))}::text[]::jsonb[]) AS v(id, d, fs)
+      WHERE g.id = v.id`;
+  }
+  if (histories.length) await tx.fieldHistory.createMany({ data: histories });
+  if (reviews.length) await tx.reviewItem.createMany({ data: reviews });
+  if (phones.length) await tx.guestPhone.createMany({ data: phones });
+  if (consentUpserts.size) {
+    const c = [...consentUpserts.values()];
+    await tx.$executeRaw`
+      INSERT INTO public."ConsentRecord" (id, "guestId", channel, status, source, "sourceSystem", "proofRef", "updatedBy", "grantedAt", "deniedAt", "updatedAt")
+      SELECT v.id, v.gid, v.ch::public."ConsentChannel", v.st::public."ConsentStatus", v.src, ${source}, v.proof, ${actorId}, v.ga::timestamp, v.da::timestamp, now()
+      FROM unnest(${c.map((x) => x.id)}::text[], ${c.map((x) => x.gid)}::text[], ${c.map((x) => x.ch)}::text[], ${c.map((x) => x.st)}::text[],
+                  ${c.map((x) => x.src)}::text[], ${c.map((x) => x.proof)}::text[], ${c.map((x) => x.ga)}::text[], ${c.map((x) => x.da)}::text[])
+           AS v(id, gid, ch, st, src, proof, ga, da)
+      ON CONFLICT ("guestId", channel) DO UPDATE SET
+        status = EXCLUDED.status, source = EXCLUDED.source, "sourceSystem" = EXCLUDED."sourceSystem", "proofRef" = EXCLUDED."proofRef",
+        "updatedBy" = EXCLUDED."updatedBy",
+        "grantedAt" = CASE WHEN EXCLUDED.status = 'GRANTED' THEN EXCLUDED."grantedAt" ELSE "ConsentRecord"."grantedAt" END,
+        "deniedAt"  = CASE WHEN EXCLUDED.status = 'GRANTED' THEN "ConsentRecord"."deniedAt" ELSE EXCLUDED."deniedAt" END,
+        "updatedAt" = now()`;
+  }
+  if (consentHist.length) await tx.consentHistory.createMany({ data: consentHist });
+  if (applied.length) {
+    await tx.$executeRaw`
+      UPDATE public."ImportRow" AS r SET applied = v.a
+      FROM unnest(${applied.map((a) => a.id)}::bigint[], ${applied.map((a) => a.json)}::text[]::jsonb[]) AS v(id, a)
+      WHERE r.id = v.id`;
+  }
   return stats;
 }
 

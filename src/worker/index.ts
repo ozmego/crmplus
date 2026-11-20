@@ -8,6 +8,7 @@ import { fetchRecording, purgeExpiredRecordings, transcribeRecording } from "@/s
 import { runMaintenance } from "@/worker/maintenance";
 import { runImportJob } from "@/worker/imports";
 import { sendCampaignJob } from "@/server/services/messaging";
+import { startThreeCxListener } from "@/server/telephony/threecx-listener";
 
 const connection = redisConnection();
 const log = (...a: unknown[]) => console.log(new Date().toISOString(), ...a);
@@ -47,8 +48,11 @@ async function schedule() {
   await m.upsertJobScheduler("qa-sample", { pattern: "0 7 * * 1", tz: "Europe/Istanbul" }, { name: "qa-sample" });
 }
 
+// 3CX: arama olayları WebSocket akışından gelir (webhook yok)
+const pbxListener = process.env.PBX_PROVIDER === "3cx" ? startThreeCxListener(log) : null;
+
 schedule()
-  .then(() => log("crmPlus işçisi çalışıyor:", workers.map((w) => w.name).join(", ")))
+  .then(() => log("crmPlus işçisi çalışıyor:", workers.map((w) => w.name).join(", "), pbxListener ? "+ 3CX olay dinleyici" : ""))
   .catch((e) => {
     console.error(e);
     process.exit(1);
@@ -56,6 +60,7 @@ schedule()
 
 async function shutdown() {
   log("kapatılıyor…");
+  pbxListener?.stop();
   await Promise.all(workers.map((w) => w.close()));
   process.exit(0);
 }
