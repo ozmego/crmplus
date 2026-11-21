@@ -12,8 +12,11 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
-  // Docker imajı için yalnız gerekli dosyaları içeren bağımsız çıktı (.next/standalone)
-  output: "standalone",
+  // Yerelde üretim derlemesi geliştirme sunucusundan ayrı klasöre alınabilir (NEXT_DIST_DIR=.next-prod)
+  distDir: process.env.NEXT_DIST_DIR || ".next",
+  // Docker imajı için yalnız gerekli dosyaları içeren bağımsız çıktı (.next/standalone).
+  // Windows'ta bu kopyalama sembolik bağlantı izni yüzünden durur; yerel üretim modu (`next start`) buna ihtiyaç duymaz.
+  output: process.platform === "win32" ? undefined : "standalone",
   serverExternalPackages: ["@node-rs/argon2", "exceljs", "bullmq", "ioredis"],
   // docs/02 §1: içe aktarma dosyaları en fazla 50 MB
   experimental: { serverActions: { bodySizeLimit: "52mb" } },

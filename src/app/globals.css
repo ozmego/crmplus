@@ -1,26 +1,32 @@
 @import "tailwindcss";
 
-/* crmPlus tasarım sistemi — "crmPlus Ürün Planı" PDF'inin görsel dili (plan v4, Tasarım sistemi) */
+/*
+ * crmPlus tasarım sistemi — siyah & altın (premium).
+ * Belirteç adları tarihsel: "ink" = marka koyusu (siyah), "teal" = vurgu (altın), "teal-ink" = açık zeminde
+ * okunur koyu altın (beyaz üzerinde ≥ 4.5:1). Bileşenler adları kullanır; tema yalnız buradan değişir.
+ */
 @theme {
-  --color-ink: #12252f;
-  --color-ink-2: #1c3440;
-  --color-cream: #fbf6ea;
-  --color-teal: #1fa29a;
-  --color-teal-ink: #0f6e68;
-  --color-surface: #ffffff;
-  --color-card: #f7f7f4;
-  --color-line: #e3e3de;
-  --color-text: #1b2a33;
-  --color-muted: #5e6b73;
-  --color-warn: #e8892b;
-  --color-warn-bg: #fdf1e3;
+  --color-ink: #121214;
+  --color-ink-2: #23232a;
+  --color-cream: #f7f1e3;
+  --color-teal: #c9a24a;
+  --color-teal-ink: #84661c;
+  --color-gold-light: #e8cf8a;
+  --color-surface: #fcfbf8;
+  --color-card: #f6f4ee;
+  --color-line: #e5e0d4;
+  --color-text: #1c1b1f;
+  --color-muted: #69655c;
+  --color-warn: #e07b22;
+  --color-warn-bg: #fdf0e2;
   --color-warn-ink: #8a4a0c;
-  --color-info-bg: #e8f3f1;
-  --color-critical: #c2412d;
+  --color-info-bg: #f5f0e2;
+  --color-critical: #b93a28;
   --color-critical-bg: #fbeae6;
   --color-ok: #2e7d4f;
 
-  --font-sans: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-sans: var(--font-manrope), "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  --font-display: var(--font-cormorant), "Cormorant Garamond", Georgia, "Times New Roman", serif;
   --font-mono: "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
 }
 
@@ -35,11 +41,71 @@ body {
   font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  font-feature-settings: "ss01", "cv11";
 }
 
 :focus-visible {
-  outline: 2px solid var(--color-teal);
+  outline: 2px solid var(--color-teal-ink);
   outline-offset: 2px;
+}
+
+/*
+ * Siyah-altın kapsam (giriş, şifre değişimi, MFA). Aynı yardımcı sınıflar değişkenler üzerinden koyu zemine uyar.
+ */
+.theme-noir {
+  --color-ink: #f3ead6; /* başlıklar: krem */
+  --color-text: #e9e3d6;
+  --color-muted: #a59e8f;
+  --color-card: #18181c;
+  --color-line: #34302a;
+  --color-teal: #d8b45c;
+  --color-teal-ink: #dcbb6a; /* koyu zeminde altın metin */
+  --color-critical: #e27a66;
+  --color-critical-bg: #2b1714;
+  --color-warn: #e9a04f;
+  --color-warn-bg: #2a2014;
+  --color-info-bg: #1e1b15;
+  color: var(--color-text);
+  background: #0b0b0d;
+  color-scheme: dark;
+}
+.theme-noir :focus-visible {
+  outline-color: #d8b45c;
+}
+.theme-noir .input {
+  background: #141417;
+  border-color: #34302a;
+  color: #f3ead6;
+}
+.theme-noir .input:focus {
+  border-color: #c9a24a;
+  box-shadow: 0 0 0 3px rgb(201 162 74 / 0.18);
+}
+.theme-noir .btn-primary {
+  background: linear-gradient(135deg, #e8cf8a 0%, #c9a24a 45%, #a07e2c 100%);
+  color: #121214;
+  box-shadow: 0 8px 24px -10px rgb(201 162 74 / 0.6);
+}
+.theme-noir .btn-primary:hover {
+  filter: brightness(1.06);
+}
+.theme-noir .callout-critical {
+  color: #f6d2ca;
+}
+.theme-noir .callout-warn {
+  color: #f5dcbc;
+}
+
+/* Altın yaldız metin ve ince altın çizgi */
+@utility text-gilded {
+  background: linear-gradient(120deg, #f3dc9a 0%, #c9a24a 40%, #f0d68e 60%, #a8842f 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+@utility gold-rule {
+  @apply h-px w-full;
+  background: linear-gradient(90deg, transparent, rgb(201 162 74 / 0.7), transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -55,10 +121,10 @@ body {
   @apply text-[11px] font-bold uppercase tracking-[0.22em] text-teal-ink;
 }
 @utility page-title {
-  @apply text-2xl font-extrabold text-ink leading-tight;
+  @apply font-display text-[32px] font-semibold leading-tight text-ink;
 }
 @utility card {
-  @apply rounded-lg border border-line bg-card p-4;
+  @apply rounded-xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(18_18_20/0.04)];
 }
 @utility card-title {
   @apply mb-2 text-[15px] font-semibold text-teal-ink;
@@ -79,7 +145,7 @@ body {
   @apply btn bg-ink text-cream hover:bg-ink-2;
 }
 @utility btn-teal {
-  @apply btn bg-teal-ink text-white hover:bg-teal;
+  @apply btn bg-teal-ink text-white hover:bg-[#6f5517];
 }
 @utility btn-secondary {
   @apply btn border border-line bg-white text-ink hover:bg-card;
@@ -91,7 +157,7 @@ body {
   @apply mb-1 block text-xs font-semibold uppercase tracking-wider text-muted;
 }
 @utility input {
-  @apply min-h-11 w-full rounded-md border border-line bg-white px-3 text-[15px] text-text placeholder:text-muted/70 focus:border-teal focus:outline-none;
+  @apply min-h-11 w-full rounded-md border border-line bg-white px-3 text-[15px] text-text transition-shadow placeholder:text-muted/70 focus:border-teal-ink focus:shadow-[0_0_0_3px_rgb(201_162_74/0.18)] focus:outline-none;
 }
 @utility pill {
   @apply inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium;

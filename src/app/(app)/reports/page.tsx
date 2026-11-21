@@ -1,117 +1,123 @@
 import Link from "next/link";
-import { can, requirePage, scopeOf } from "@/server/auth/rbac";
-import { agentReport, todayIso } from "@/server/services/reports";
-import { hm, mmss, pct } from "@/lib/kpi";
+import {
+  AlertTriangle,
+  ArrowUpRight,
+  AudioLines,
+  BadgeCheck,
+  CalendarClock,
+  ChartColumn,
+  FileSpreadsheet,
+  Gem,
+  Landmark,
+  MessageSquareText,
+  MonitorDot,
+  PhoneCall,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
+import { can, requirePage, type Principal } from "@/server/auth/rbac";
+import type { Permission } from "@/server/auth/permissions";
 
 export const dynamic = "force-dynamic";
 
-const SCOPE = { own: "Kendi performansınız", team: "Ekibiniz", all: "Tüm personel" } as const;
+interface Report {
+  href: string;
+  title: string;
+  desc: string;
+  icon: LucideIcon;
+  perms: Permission[];
+}
 
-export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ from?: string; to?: string }> }) {
+/** Rapor merkezi: tüm raporlar kategorilere göre; her kart yalnız erişim yetkisi olana görünür. */
+const CATEGORIES: { title: string; reports: Report[] }[] = [
+  {
+    title: "Oyuncular ve casinolar",
+    reports: [
+      { href: "/reports/players", title: "Oyuncu ve trip raporu", desc: "Casinoya gönderilen oyuncular, yeni/tekrar gelen, aylık trend, casino ve ülke dağılımı; Excel.", icon: Users, perms: ["report.product", "finance.view"] },
+      { href: "/reports/casinos", title: "Casino performans raporu", desc: "Casino bazında trip ve oyuncu; finans yetkisiyle kayıp/kazanç, rolling ve onaylı komisyon.", icon: Gem, perms: ["report.product", "finance.view"] },
+      { href: "/locations", title: "Casino profilleri", desc: "Casino bazında tripler, oyuncular ve (finans yetkisiyle) sözleşme ve sonuçlar.", icon: Gem, perms: ["finance.view", "report.product"] },
+    ],
+  },
+  {
+    title: "Operasyon",
+    reports: [
+      { href: "/ops", title: "Operasyon paneli", desc: "Bugün bekleyen işler, geri arama SLA'sı, ekip kapasitesi ve ürün metrikleri.", icon: MonitorDot, perms: ["report.product"] },
+      { href: "/ops/live", title: "Canlı kanal panosu", desc: "Çağrı, SMS ve WhatsApp kanallarının anlık durumu.", icon: MonitorDot, perms: ["report.product"] },
+      { href: "/ops/capacity", title: "Kapasite planı", desc: "Saatlik iş yükü ve vardiyadaki temsilci ihtiyacı.", icon: CalendarClock, perms: ["report.product"] },
+      { href: "/reports/anomalies", title: "Operasyon anomalileri", desc: "Olağan dışı arama, süre ve sonuç örüntüleri (inceleme için öneri).", icon: AlertTriangle, perms: ["report.product"] },
+    ],
+  },
+  {
+    title: "Çağrı merkezi ve kalite",
+    reports: [
+      { href: "/reports/calls", title: "Çağrı ve kampanya raporu", desc: "Günlük arama hacmi, sonuç kodu dağılımı, ulaşma oranı ve kampanya teslim durumları.", icon: PhoneCall, perms: ["report.product"] },
+      { href: "/reports/agents", title: "Personel ve ekip raporu", desc: "Arama, konuşma, ulaşma, geri arama ve sonuç kaydı göstergeleri; Excel dışa aktarımı.", icon: Users, perms: ["report.view"] },
+      { href: "/reports/speech", title: "Ses analizi doğruluk paneli", desc: "Transkript oranı, düşük güven, etiket düzeltme ve inceleme kuyruğu yaşı.", icon: AudioLines, perms: ["report.product"] },
+      { href: "/qa", title: "Kalite örneklemesi", desc: "Haftalık örneklem, kriterli inceleme ve itirazlar (puan yok).", icon: BadgeCheck, perms: ["qa.review"] },
+    ],
+  },
+  {
+    title: "İletişim",
+    reports: [
+      { href: "/messages", title: "Kampanya sonuçları", desc: "SMS ve WhatsApp kampanyaları: hedef, hariç tutulanlar, teslim ve ret.", icon: MessageSquareText, perms: ["message.campaign.prepare", "message.campaign.approve"] },
+    ],
+  },
+  {
+    title: "Veri",
+    reports: [
+      { href: "/imports", title: "İçe aktarma geçmişi", desc: "Yüklenen dosyalar, hatalı satır raporları ve geri alma kayıtları.", icon: FileSpreadsheet, perms: ["import.view"] },
+    ],
+  },
+  {
+    title: "Finans",
+    reports: [
+      { href: "/finance", title: "Komisyon dönemleri", desc: "Dönem durumları, hesaplamalar, mutabakat ve finans kontrol bulguları.", icon: Landmark, perms: ["finance.view"] },
+    ],
+  },
+  {
+    title: "Personel",
+    reports: [
+      { href: "/hr/timesheet", title: "Puantaj", desc: "Aylık puantaj, düzeltmeler ve bordro dışa aktarımı.", icon: CalendarClock, perms: ["timesheet.export", "timesheet.approve"] },
+    ],
+  },
+];
+
+function visible(user: Principal) {
+  return CATEGORIES.map((c) => ({ ...c, reports: c.reports.filter((r) => r.perms.some((p) => can(user, p))) })).filter((c) => c.reports.length > 0);
+}
+
+export default async function ReportsHub() {
   const user = await requirePage("report.view");
-  const sp = await searchParams;
-  const today = todayIso();
-  const from = /^\d{4}-\d{2}-\d{2}$/.test(sp.from ?? "") ? sp.from! : today;
-  const to = /^\d{4}-\d{2}-\d{2}$/.test(sp.to ?? "") ? sp.to! : today;
-  const { rows, total } = await agentReport(user, from, to);
-  const exportable = can(user, "export.basic") || can(user, "export.bulk");
-
+  const cats = visible(user);
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-8">
       <div>
-        <p className="eyebrow">RAPORLAR</p>
-        <h1 className="page-title">Personel ve ekip raporu</h1>
-        <p className="mt-1 text-sm text-muted">{SCOPE[scopeOf(user, "report.view") ?? "own"]} · {from === to ? from : `${from} – ${to}`} · İstanbul saati{can(user, "report.product") && <> · <Link href="/reports/speech" className="font-semibold text-teal-ink underline">Ses analizi doğruluk paneli</Link> · <Link href="/reports/anomalies" className="font-semibold text-teal-ink underline">Operasyon anomalileri</Link></>}</p>
+        <p className="eyebrow">RAPORLAMA</p>
+        <h1 className="page-title">Rapor merkezi</h1>
+        <p className="mt-1 text-sm text-muted">Yetkinizin kapsadığı tüm raporlar. Formüller ve hariç tutulanlar her raporun kendi sayfasında (docs/05).</p>
       </div>
-
-      <form className="flex flex-wrap items-end gap-3">
-        <div><label htmlFor="from" className="label">Başlangıç</label><input id="from" name="from" type="date" defaultValue={from} className="input" /></div>
-        <div><label htmlFor="to" className="label">Bitiş</label><input id="to" name="to" type="date" defaultValue={to} className="input" /></div>
-        <button className="btn-primary">Uygula</button>
-      </form>
-      {exportable && (
-        <form action="/api/reports/agents" method="get" className="flex flex-wrap items-end gap-3">
-          <input type="hidden" name="from" value={from} />
-          <input type="hidden" name="to" value={to} />
-          <div className="min-w-72">
-            <label htmlFor="exp-reason" className="label">Dışa aktarma gerekçesi (kayıt altına alınır)</label>
-            <input id="exp-reason" name="reason" required minLength={5} maxLength={300} className="input" placeholder="ör. haftalık ekip toplantısı" />
-          </div>
-          <button className="btn-secondary">Excel olarak indir</button>
-        </form>
-      )}
-
-      <p className="callout-info">
-        Arama adedi ve konuşma süresi tek başına başarı ölçütü değildir; ulaşma, ret, eksik kayıt ve geri arama oranlarıyla birlikte okunur.
-        Tablo isme göre sıralıdır.
-      </p>
-
-      <div className="overflow-x-auto rounded-lg border border-line">
-        <table className="table-ink min-w-[1200px]">
-          <thead>
-            <tr>
-              <th scope="col">Personel</th>
-              <th scope="col">Ekip</th>
-              <th scope="col">Atanan / tamamlanan görev</th>
-              <th scope="col">Arama denemesi</th>
-              <th scope="col">Tekil numara</th>
-              <th scope="col">Toplam konuşma</th>
-              <th scope="col">Ort. konuşma</th>
-              <th scope="col">Ulaşılan</th>
-              <th scope="col">Ulaşılamayan</th>
-              <th scope="col">Geri arama talebi</th>
-              <th scope="col">Geri arama zamanında</th>
-              <th scope="col">İletişim istemiyor</th>
-              <th scope="col">Eksik sonuç / not</th>
-            </tr>
-          </thead>
-          <tbody className="tabular-nums">
-            {rows.length === 0 && <tr><td colSpan={13} className="py-6 text-center text-muted">Kapsamınızda çağrı yapan personel yok.</td></tr>}
-            {rows.map((r) => (
-              <tr key={r.userId}>
-                <th scope="row" className="px-3 py-2 text-left font-semibold text-ink">{r.name}</th>
-                <td>{r.team ?? "—"}</td>
-                <td>{r.assignedTasks} / {r.doneTasks}</td>
-                <td>{r.kpi.attempts}</td>
-                <td>{r.kpi.uniqueNumbers}</td>
-                <td>{hm(r.kpi.talkSecTotal)}</td>
-                <td>{mmss(r.kpi.talkSecAvg)}</td>
-                <td>{pct(r.kpi.reachRate)}</td>
-                <td>{pct(r.kpi.unreachRate)}</td>
-                <td>{r.kpi.callbackRequests}</td>
-                <td>{pct(r.callbacks.onTimeRate)} <span className="text-xs text-muted">({r.callbacks.done}/{r.callbacks.total})</span></td>
-                <td>{r.kpi.dncCount} <span className="text-xs text-muted">({pct(r.kpi.rejectRate, 1)})</span></td>
-                <td className={(r.kpi.missingDispositionRate ?? 0) + (r.kpi.missingNoteRate ?? 0) > 0.02 ? "text-critical" : ""}>
-                  {pct(r.kpi.missingDispositionRate, 1)} / {pct(r.kpi.missingNoteRate, 1)}
-                </td>
-              </tr>
+      {cats.map((c) => (
+        <section key={c.title} className="flex flex-col gap-3">
+          <h2 className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.22em] text-teal-ink">
+            <ChartColumn className="h-3.5 w-3.5" aria-hidden /> {c.title}
+          </h2>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {c.reports.map(({ href, title, desc, icon: Icon }) => (
+              <Link key={href} href={href} className="group flex gap-4 rounded-xl border border-line bg-white p-4 shadow-[0_1px_2px_rgb(18_18_20/0.04)] transition-colors hover:border-teal-ink/50">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-[#c9a24a]/40 bg-[#c9a24a]/10">
+                  <Icon className="h-5 w-5 text-teal-ink" strokeWidth={1.8} aria-hidden />
+                </span>
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="flex items-center gap-1 font-semibold text-ink">
+                    {title} <ArrowUpRight className="h-3.5 w-3.5 text-muted transition-colors group-hover:text-teal-ink" aria-hidden />
+                  </span>
+                  <span className="text-sm text-muted">{desc}</span>
+                </span>
+              </Link>
             ))}
-          </tbody>
-          {rows.length > 1 && (
-            <tfoot>
-              <tr className="border-t-2 border-ink font-semibold tabular-nums">
-                <th scope="row" className="px-3 py-2 text-left">Toplam</th>
-                <td />
-                <td className="px-3">{total.assignedTasks} / {total.doneTasks}</td>
-                <td className="px-3">{total.kpi.attempts}</td>
-                <td className="px-3">{total.kpi.uniqueNumbers}</td>
-                <td className="px-3">{hm(total.kpi.talkSecTotal)}</td>
-                <td className="px-3">{mmss(total.kpi.talkSecAvg)}</td>
-                <td className="px-3">{pct(total.kpi.reachRate)}</td>
-                <td className="px-3">{pct(total.kpi.unreachRate)}</td>
-                <td className="px-3">{total.kpi.callbackRequests}</td>
-                <td className="px-3">{pct(total.callbacks.onTimeRate)}</td>
-                <td className="px-3">{total.kpi.dncCount}</td>
-                <td className="px-3">{pct(total.kpi.missingDispositionRate, 1)} / {pct(total.kpi.missingNoteRate, 1)}</td>
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
-      <p className="text-xs text-muted">
-        Tanımlar (docs/05): ulaşılan = “Ulaşıldı” kategorisindeki sonuçlar (yanlış kişi hariç) / tüm denemeler · ort. konuşma yalnız bağlanan çağrılar ·
-        geri arama zamanında = planlanan ±15 dk içinde ilk deneme · otomatik kapatılan çağrılar süre metriklerine girmez.
-      </p>
+          </div>
+        </section>
+      ))}
     </div>
   );
 }

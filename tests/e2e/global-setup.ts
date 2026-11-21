@@ -38,6 +38,11 @@ const E2E_ONLY: [email: string, role: string, name: string][] = [
   ["e2e-finans3@crmplus.local", "finance", "E2E Finans Ekstre"],
   ["e2e-finans4@crmplus.local", "finance", "E2E Finans Mutabakat"],
   ["e2e-ops-a@crmplus.local", "ops_manager", "E2E Operasyon Anomali"],
+  // profile → casino müşteri profili + raporlama modülü
+  ["e2e-ops-c@crmplus.local", "ops_manager", "E2E Operasyon Profil"],
+  ["e2e-temsilci-c@crmplus.local", "agent", "E2E Temsilci Profil"],
+  ["e2e-admin-r@crmplus.local", "sys_admin", "E2E Yönetici Rapor"],
+  ["e2e-finans-c@crmplus.local", "finance", "E2E Finans Profil"],
 ];
 const DEMO_RESET = ["temsilci1@crmplus.local", "temsilci2@crmplus.local", "veri@crmplus.local", "operasyon@crmplus.local", "lider@crmplus.local"];
 

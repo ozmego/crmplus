@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { AuthShell } from "@/components/auth-shell";
 import { ChangePasswordForm } from "@/components/auth-forms";
 import { readSession } from "@/server/auth/session";
+import { passwordMinLength } from "@/server/auth/policy";
 
 export default async function ChangePasswordPage() {
   const session = await readSession();
@@ -12,8 +13,8 @@ export default async function ChangePasswordPage() {
     <AuthShell>
       <p className="eyebrow mb-1">HESAP</p>
       <h2 className="page-title mb-2">{t("changeTitle")}</h2>
-      <p className="mb-6 text-sm text-muted">{t("changeHint")}</p>
-      <ChangePasswordForm />
+      <p className="mb-6 text-sm text-muted">{t("changeHint", { min: passwordMinLength() })}</p>
+      <ChangePasswordForm minLength={passwordMinLength()} />
     </AuthShell>
   );
 }

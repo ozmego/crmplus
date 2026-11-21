@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useActionState, useState } from "react";
 import { useTranslations } from "next-intl";
+import { ArrowRight, KeyRound, Mail } from "lucide-react";
 import {
   changePasswordAction,
   loginAction,
@@ -31,31 +32,40 @@ export function LoginForm() {
   // React 19 form eyleminden sonra alanları sıfırlar; e-posta korunur, şifre bilinçli olarak temizlenir.
   const [email, setEmail] = useState("");
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form action={action} className="flex flex-col gap-5">
       <div>
         <label className="label" htmlFor="email">{t("email")}</label>
-        <input
-          id="email"
-          name="email"
-          type="email"
-          autoComplete="username"
-          required
-          className="input"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
+        <div className="relative">
+          <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden />
+          <input
+            id="email"
+            name="email"
+            type="email"
+            autoComplete="username"
+            required
+            className="input pl-10!"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
       </div>
       <div>
         <label className="label" htmlFor="password">{t("password")}</label>
-        <input id="password" name="password" type="password" autoComplete="current-password" required className="input" />
+        <div className="relative">
+          <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden />
+          <input id="password" name="password" type="password" autoComplete="current-password" required className="input pl-10!" />
+        </div>
       </div>
       <ErrorBox state={state} />
-      <button className="btn-primary" disabled={pending}>{t("signIn")}</button>
+      <button className="btn-primary mt-1 min-h-12 tracking-wide" disabled={pending}>
+        {t("signIn")}
+        <ArrowRight className="h-4 w-4" aria-hidden />
+      </button>
     </form>
   );
 }
 
-export function ChangePasswordForm() {
+export function ChangePasswordForm({ minLength = 8 }: { minLength?: number }) {
   const t = useTranslations("auth");
   const tc = useTranslations("common");
   const [state, action, pending] = useActionState(changePasswordAction, undefined);
@@ -63,11 +73,11 @@ export function ChangePasswordForm() {
     <form action={action} className="flex flex-col gap-4">
       <div>
         <label className="label" htmlFor="password">{t("newPassword")}</label>
-        <input id="password" name="password" type="password" autoComplete="new-password" required minLength={12} className="input" />
+        <input id="password" name="password" type="password" autoComplete="new-password" required minLength={minLength} className="input" />
       </div>
       <div>
         <label className="label" htmlFor="password2">{t("newPassword2")}</label>
-        <input id="password2" name="password2" type="password" autoComplete="new-password" required minLength={12} className="input" />
+        <input id="password2" name="password2" type="password" autoComplete="new-password" required minLength={minLength} className="input" />
       </div>
       <ErrorBox state={state} />
       <button className="btn-primary" disabled={pending}>{tc("continue")}</button>

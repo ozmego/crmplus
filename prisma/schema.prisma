@@ -232,6 +232,8 @@ model Guest {
   calls        Call[]
   callbacks    Callback[]
   history      FieldHistory[]
+  profile      GuestProfile?
+  documents    GuestDocument[]
 
   @@index([lastName, firstName])
   @@index([ownerId])
@@ -977,15 +979,35 @@ model Setting {
 // finans tablolarına ilişki tanımlanmaz, böylece CRM sorguları finans verisine yanlışlıkla ulaşamaz.
 
 model Casino {
-  id        String             @id @default(cuid())
-  name      String             @unique
-  country   String?
-  currency  String             @default("TRY")
-  contracts Contract[]
-  trips     Trip[]
-  periods   CommissionPeriod[]
-  createdAt DateTime           @default(now())
+  id          String             @id @default(cuid())
+  name        String             @unique
+  country     String?
+  currency    String             @default("TRY")
+  contracts   Contract[]
+  trips       Trip[]
+  periods     CommissionPeriod[]
+  creditLines GuestCreditLine[]
+  createdAt   DateTime           @default(now())
 
+  @@schema("finance")
+}
+
+/// Casinoya gönderilen oyuncu için ön yatırım (front money) ve kredi hattı — yalnız finans (plan v4 §8).
+/// guestId public.Guest.id'dir; şema ayrımı için ilişki tanımlanmaz.
+model GuestCreditLine {
+  id          String   @id @default(cuid())
+  guestId     String
+  casinoId    String
+  casino      Casino   @relation(fields: [casinoId], references: [id])
+  frontMoney  Decimal? @db.Decimal(18, 2)
+  creditLimit Decimal? @db.Decimal(18, 2)
+  currency    String
+  note        String?
+  updatedBy   String
+  updatedAt   DateTime @updatedAt
+
+  @@unique([guestId, casinoId])
+  @@index([casinoId])
   @@schema("finance")
 }
 
@@ -1035,14 +1057,15 @@ model Trip {
 }
 
 model TripGuest {
-  id        String         @id @default(cuid())
+  id        String           @id @default(cuid())
   tripId    String
-  trip      Trip           @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  trip      Trip             @relation(fields: [tripId], references: [id], onDelete: Cascade)
   guestId   String // public.Guest.id (ilişki tanımlanmaz)
   crmNo     Int
   guestName String // eklendiği anki ad (anlık görüntü)
   country   String? // eklendiği anki ülke (ülke bazlı kurallar için anlık görüntü)
   results   GamingResult[]
+  travel    TripGuestTravel?
 
   @@unique([tripId, guestId])
   @@schema("finance")
@@ -1576,5 +1599,81 @@ model StatementLine {
   resultId    String? // uygulandıysa oluşan GamingResult
 
   @@index([statementId])
+  @@schema("finance")
+}
+
+// ───────────── Casino müşteri profili (casinoya gönderilen oyuncunun tüm bilgileri; yalnız sistem içinde) ─────────────
+
+/// Kimlik ve casino tercihleri. Kimlik numaraları ve adres alan şifreli; arama için kör indeks (hash).
+/// Kimlik alanlarını yalnız field.identity yetkisi görür ve her görüntüleme erişim kaydına yazılır.
+model GuestProfile {
+  guestId         String    @id
+  guest           Guest     @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  nationality     String? // ISO-3166 alfa-2
+  gender          String? // F | M | X
+  birthDate       DateTime? @db.Date
+  tcNoEnc         String?
+  tcNoHash        String?
+  passportNoEnc   String?
+  passportNoHash  String?
+  passportCountry String?
+  passportExpiry  DateTime? @db.Date
+  addressEnc      String?
+  games           String[]  @default([]) // BACCARAT | ROULETTE | BLACKJACK | POKER | SLOT | OTHER
+  tableMin        Int?
+  tableMax        Int?
+  limitCurrency   String?
+  hostUserId      String?
+  preferences     String? // oda, yemek, sigara, özel istekler (sağlık bilgisi yazılmaz)
+  updatedBy       String?
+  updatedAt       DateTime  @updatedAt
+
+  @@index([tcNoHash])
+  @@index([passportNoHash])
+  @@schema("public")
+}
+
+/// Kimlik/pasaport görüntüsü ve vesikalık: virüs taramalı, şifreli dosya; görüntüleme gerekçeli ve kayıtlı.
+model GuestDocument {
+  id         String    @id @default(cuid())
+  guestId    String
+  guest      Guest     @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  kind       String // PASSPORT | ID_CARD | PHOTO | VISA | OTHER
+  fileName   String
+  mime       String
+  size       Int
+  sha256     String
+  storageKey String
+  scanResult String
+  uploadedBy String
+  createdAt  DateTime  @default(now())
+  deletedAt  DateTime?
+  deletedBy  String?
+
+  @@index([guestId])
+  @@schema("public")
+}
+
+/// Trip katılımcısının seyahat bilgisi (uçuş, otel, transfer). Tutar içermez.
+model TripGuestTravel {
+  tripGuestId String    @id
+  tripGuest   TripGuest @relation(fields: [tripGuestId], references: [id], onDelete: Cascade)
+  outFlight   String?
+  outAt       DateTime?
+  outRoute    String?
+  retFlight   String?
+  retAt       DateTime?
+  retRoute    String?
+  pnr         String?
+  hotel       String?
+  roomType    String?
+  checkIn     DateTime? @db.Date
+  checkOut    DateTime? @db.Date
+  transfer    String?
+  companion   String?
+  note        String?
+  updatedBy   String
+  updatedAt   DateTime  @updatedAt
+
   @@schema("finance")
 }

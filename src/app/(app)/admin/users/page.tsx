@@ -2,6 +2,7 @@ import Link from "next/link";
 import { can, requirePage } from "@/server/auth/rbac";
 import { db } from "@/server/db";
 import { listUsers } from "@/server/services/users";
+import { mfaRequired } from "@/server/auth/policy";
 import { CreateUserForm, TeamForm, UserRowActions } from "@/components/admin-users";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +24,7 @@ export default async function UsersPage() {
   const canManage = can(me, "user.manage");
   const canRoles = can(me, "role.assign");
   const canTeam = can(me, "team.manage");
+  const mfa = mfaRequired();
 
   return (
     <div className="flex flex-col gap-6">
@@ -64,7 +66,7 @@ export default async function UsersPage() {
                     <span className={`pill ${st.cls}`}>{st.label}</span>
                     {locked && <span className="pill ml-1 border-warn text-warn-ink">Geçici kilit</span>}
                   </td>
-                  <td className="text-xs">{u.mfaEnabledAt ? "Kurulu" : <span className="text-warn-ink">Kurulmadı</span>}</td>
+                  <td className="text-xs">{!mfa ? <span className="text-muted">Kapalı (politika)</span> : u.mfaEnabledAt ? "Kurulu" : <span className="text-warn-ink">Kurulmadı</span>}</td>
                   <td className="text-xs text-muted">{u.lastLoginAt?.toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" }) ?? "—"}</td>
                   <td>
                     <UserRowActions

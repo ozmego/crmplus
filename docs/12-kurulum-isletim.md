@@ -32,7 +32,7 @@ docker compose --env-file .env.production run --rm worker pnpm db:seed:prod   # 
 curl -fsS https://crm.sirket.com.tr/api/health                                  # {"status":"ok",...}
 ```
 
-- İlk yönetici `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` ile girer; ilk girişte şifre değişimi ve MFA zorunludur. Ardından seed parolasını `.env.production`'dan silin.
+- İlk yönetici `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` ile girer ve ilk girişte şifresini değiştirmek zorundadır. `AUTH_MFA_REQUIRED=true` ise ardından MFA kurulumu da zorunludur. Sonra seed parolasını `.env.production`'dan silin.
 - **Demo verisi üretimde yüklenmez** (`SEED_DEMO` tanımlanmaz).
 - ClamAV ilk açılışta imza indirir (birkaç dakika); bu sürede dosya yükleme “taranamadı” hatası verir — bilinçli olarak taranmamış dosya kabul edilmez.
 - İç ağ kurulumunda (`CRMPLUS_TLS=internal`) Caddy'nin kök sertifikası (`caddy-data` birimi → `/data/caddy/pki/authorities/local/root.crt`) istemci bilgisayarlara güvenilir kök olarak dağıtılır.
@@ -129,7 +129,7 @@ Duman testi şunları denetler:
 - yanlış şifrenin reddi ve oturum çerezinin özellikleri;
 - yönetim sayfalarının açılması.
 
-Testin tarayıcı akışında kurulan MFA sırrı yalnız test sırasında görünür. Bu yüzden yönetici, testten sonra MFA'yı kendi doğrulama uygulamasına yeniden kurar: Yönetim > Kullanıcılar > MFA sıfırla, ardından giriş yapar.
+MFA açıksa (`AUTH_MFA_REQUIRED=true`), testin tarayıcı akışında kurulan MFA sırrı yalnız test sırasında görünür. Bu yüzden yönetici, testten sonra MFA'yı kendi doğrulama uygulamasına yeniden kurar: Yönetim > Kullanıcılar > MFA sıfırla, ardından giriş yapar.
 
 **Virüs taraması** sunucuda, worker konteynerinde ayrıca sınanır. Temiz dosya `CLEAN`, EICAR test dizisi `INFECTED` dönmelidir:
 ```bash
@@ -149,6 +149,15 @@ docker compose --env-file .env.production exec worker node_modules/.bin/tsx --re
 - Yalnız 80/443 açıktır; veritabanı, Redis ve ClamAV iç ağdadır.
 - Caddy'nin önünde başka vekil yoktur; istemci `X-Forwarded-For` başlıklarına güvenilmez (denetim kaydındaki IP sahte başlıkla değiştirilemez). Önüne yük dengeleyici konursa Caddy `trusted_proxies` yalnız o cihazın IP'siyle ayarlanır.
 - Oturum çerezleri üretimde `Secure`, `HttpOnly`, `SameSite=Strict`.
+- **Giriş politikası (20 Kasım 2026 şirket kararı):**
+  - İki adımlı doğrulama (MFA) varsayılan olarak **kapalıdır** (`AUTH_MFA_REQUIRED=false`).
+  - Şifre en az `PASSWORD_MIN_LENGTH` karakter olmalı (varsayılan 8); harf veya rakam zorunluluğu yoktur.
+  - MFA kapalıyken hesap güvenliği yalnız şifreye dayanır. Şu korumalar çalışmaya devam eder:
+    - 5 hatalı denemede 15 dakika kilit, 10 denemede hesabın kilitlenmesi;
+    - IP ve e-posta başına deneme sınırı;
+    - ilk girişte şifre değişimi;
+    - denetim kaydı.
+  - Sistem kişisel ve finansal veri içerdiği için canlıda `AUTH_MFA_REQUIRED=true` önerilir (KVKK teknik tedbir). Açıldığında kullanıcılar bir sonraki girişte MFA kurar; kod ve testler hazırdır.
 - Sahte (mock) sağlayıcılar üretimde çalışmaz; yapılandırılmamış servis açık hata verir veya kapalı kalır (ör. İYS yokken TR numaralara ileti gitmez).
 - Uygulama ve işçi konteynerleri root olmayan kullanıcıyla (`node`) çalışır.
 

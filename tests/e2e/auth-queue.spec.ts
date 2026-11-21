@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { generateSync } from "otplib";
 import { PrismaClient } from "@prisma/client";
+import { mfaOn } from "./helpers";
 
 process.loadEnvFile?.(".env");
 const db = new PrismaClient();
@@ -9,7 +10,7 @@ const NEW_PASSWORD = "YeniSifre2026test";
 
 test.afterAll(async () => db.$disconnect());
 
-test("ilk giriş → şifre değişimi → MFA kurulumu → arama kuyruğu → çağrı kapatma", async ({ page }) => {
+test("ilk giriş → şifre değişimi → (MFA açıksa) MFA kurulumu → arama kuyruğu → çağrı kapatma", async ({ page }) => {
   // Hatalı şifre
   await page.goto("/login");
   await page.getByLabel("E-posta").fill(EMAIL);
@@ -25,16 +26,24 @@ test("ilk giriş → şifre değişimi → MFA kurulumu → arama kuyruğu → �
   await page.getByLabel("Yeni şifre (tekrar)").fill(NEW_PASSWORD);
   await page.getByRole("button", { name: "Devam" }).click();
 
-  // MFA kurulumu: ekrandaki anahtarla kod üret
-  await expect(page).toHaveURL(/mfa/);
-  const secret = (await page.locator("p.font-mono").first().innerText()).trim();
-  await page.getByLabel("Doğrulama kodu").fill(generateSync({ secret }));
-  await page.getByRole("button", { name: "Doğrula" }).click();
-  await expect(page.getByText("Kurtarma kodlarınız")).toBeVisible();
-  await page.getByRole("link", { name: "Kaydettim, devam et" }).click();
+  if (mfaOn()) {
+    // MFA kurulumu: ekrandaki anahtarla kod üret
+    await expect(page).toHaveURL(/mfa/);
+    const secret = (await page.locator("p.font-mono").first().innerText()).trim();
+    await page.getByLabel("Doğrulama kodu").fill(generateSync({ secret }));
+    await page.getByRole("button", { name: "Doğrula" }).click();
+    await expect(page.getByText("Kurtarma kodlarınız")).toBeVisible();
+    await page.getByRole("link", { name: "Kaydettim, devam et" }).click();
+  } else {
+    // MFA kapalı: şifre değişiminden sonra doğrudan dashboard; /mfa adresi de ana sayfaya döner
+    await expect(page).not.toHaveURL(/mfa/);
+    await page.goto("/mfa");
+    await expect(page).not.toHaveURL(/mfa/);
+  }
 
-  // Temsilci → kuyruk
-  await expect(page).toHaveURL(/\/queue/);
+  // Temsilci → dashboard (Benim günüm) → kuyruk
+  await expect(page.getByRole("heading", { name: "Benim günüm" })).toBeVisible();
+  await page.goto("/queue");
   await expect(page.getByRole("heading", { name: "Arama kuyruğu" })).toBeVisible();
 
   // Kuyrukta yalnız izni GRANTED olanlar: veritabanından beklenen sayıyı hesapla

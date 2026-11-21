@@ -17,7 +17,7 @@ export default async function FinanceLayout({ children }: { children: React.Reac
           ["/finance/trips", "Tripler ve sonuçlar"],
           ["/finance/contracts", "Casinolar ve sözleşmeler"],
         ].map(([href, label]) => (
-          <Link key={href} href={href} className="rounded border border-line bg-white px-3 py-1.5 text-sm hover:bg-card">{label}</Link>
+          <Link key={href} href={href} className="rounded-md border border-line bg-white px-3 py-1.5 text-sm font-medium hover:border-teal-ink/50 hover:bg-card">{label}</Link>
         ))}
       </nav>
       {children}

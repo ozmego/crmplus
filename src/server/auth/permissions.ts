@@ -131,6 +131,8 @@ export const DEFAULT_ROLES: RoleDef[] = [
       "user.view", "user.manage", "role.manage", "role.assign", "team.manage",
       "settings.manage", "integration.manage", "audit.view", "alert.view", "alert.resolve",
       "emergency.access", "block.create", "vocabulary.manage", ["roster.view", "own"], ["attendance.view", "own"], ["leave.request", "own"],
+      // 20 Kasım 2026: raporlama modülüne erişim (toplulaştırılmış; oyuncu adı/kimlik için ayrı yetki gerekir)
+      "report.view", "report.product",
     ],
   },
   {

@@ -33,7 +33,7 @@ export default async function SpeechReportPage({ searchParams }: { searchParams:
       <div>
         <p className="eyebrow">RAPORLAR · SES ANALİZİ</p>
         <h1 className="page-title">Analiz doğruluk paneli</h1>
-        <p className="mt-1 text-sm text-muted">Toplulaştırılmış göstergeler; kişi bazlı içerik ve temsilci sıralaması yoktur. Formüller docs/05 §7a ile aynıdır. <Link href="/reports" className="text-teal-ink underline">Diğer raporlar</Link></p>
+        <p className="mt-1 text-sm text-muted">Toplulaştırılmış göstergeler; kişi bazlı içerik ve temsilci sıralaması yoktur. Formüller docs/05 §7a ile aynıdır. <Link href="/reports" className="text-teal-ink underline">Rapor merkezi</Link></p>
       </div>
       <form className="flex flex-wrap items-end gap-2 text-sm">
         <div><label htmlFor="from" className="label">Başlangıç</label><input id="from" type="date" name="from" defaultValue={from} className="input min-h-9" /></div>

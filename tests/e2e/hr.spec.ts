@@ -41,7 +41,8 @@ test("personel ve puantaj: kayıt → çizelge (kural uyarısı) → otomatik pu
 
   // 1. İK: personel kayıtları (CRM kullanıcısına bağlı temsilci + saha personeli)
   const hr1 = await newPage("e2e-ik1@crmplus.local");
-  await expect(hr1).toHaveURL(/\/hr\/employees/);
+  await expect(hr1.getByRole("heading", { name: "Personel", exact: true })).toBeVisible(); // dashboard bölümü
+  await hr1.goto("/hr/employees");
   for (const [sicil, first, last, dept, email] of [
     [`P${s}`, "Puantaj", `Temsilci${s}`, "CALL_CENTER", "e2e-temsilci-p@crmplus.local"],
     [`S${s}`, "Saha", `Host${s}`, "FIELD", "e2e-saha@crmplus.local"],
@@ -189,7 +190,8 @@ test("personel ve puantaj: kayıt → çizelge (kural uyarısı) → otomatik pu
   await expect(card.getByText("Yayında")).toBeVisible();
 
   const host = await newPage("e2e-saha@crmplus.local");
-  await expect(host).toHaveURL(/\/hr\/my-route/);
+  await expect(host.getByRole("navigation", { name: "Hızlı erişim" }).getByRole("link", { name: "Bugünkü rotam" })).toBeVisible();
+  await host.goto("/hr/my-route");
   const stop = host.getByTestId("stop").filter({ hasText: `E2E Casino ${s}` });
   await stop.getByRole("button", { name: "Vardım" }).click();
   await expect(stop.getByTestId("stop-status")).toContainText("Varış");

@@ -16,9 +16,11 @@
     "sampleData": "Örnek veri"
   },
   "nav": {
-    "ops": "Operasyon",
+    "dashboard": "Dashboard",
+    "locations": "Casinolar",
+    "ops": "Operasyon paneli",
     "queue": "Arama kuyruğu",
-    "guests": "Misafirler",
+    "guests": "Oyuncular",
     "imports": "İçe aktarma",
     "compare": "Karşılaştırma",
     "review": "İnceleme",
@@ -59,7 +61,7 @@
     "recoveryHint": "Telefonunuza erişemezseniz bu kodlarla giriş yapabilirsiniz. Her kod bir kez kullanılır. Güvenli bir yere kaydedin; bir daha gösterilmeyecek.",
     "recoveryDone": "Kaydettim, devam et",
     "changeTitle": "Yeni şifre belirleyin",
-    "changeHint": "İlk girişte şifrenizi değiştirmeniz gerekiyor. En az 12 karakter, harf ve rakam.",
+    "changeHint": "İlk girişte şifrenizi değiştirmeniz gerekiyor. En az {min} karakter.",
     "newPassword": "Yeni şifre",
     "newPassword2": "Yeni şifre (tekrar)",
     "mismatch": "Şifreler eşleşmiyor.",

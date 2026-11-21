@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { AuthShell } from "@/components/auth-shell";
 import { MfaSetupForm, MfaVerifyForm } from "@/components/auth-forms";
-import { readSession } from "@/server/auth/session";
+import { markSessionMfaVerified, readSession } from "@/server/auth/session";
+import { mfaRequired } from "@/server/auth/policy";
 import { ensureMfaSecret } from "@/server/auth/account";
 import { mfaQrDataUrl } from "@/server/auth/mfa";
 
@@ -11,6 +12,11 @@ export default async function MfaPage() {
   if (!session) redirect("/login");
   if (session.user.mustChangePassword) redirect("/change-password");
   if (session.mfaVerified) redirect("/");
+  // MFA kapalı (AUTH_MFA_REQUIRED): şifreyle açılmış eski oturum doğrulanmış sayılır
+  if (!mfaRequired()) {
+    await markSessionMfaVerified();
+    redirect("/");
+  }
   const t = await getTranslations("auth");
 
   if (session.user.mfaEnabledAt) {
@@ -36,7 +42,7 @@ export default async function MfaPage() {
         <li>{t("mfaSetupStep2")}</li>
       </ol>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={qr} alt="MFA QR kodu" width={180} height={180} className="mb-3 rounded-md border border-line" />
+      <img src={qr} alt="MFA QR kodu" width={180} height={180} className="mb-3 rounded-lg border border-line bg-white p-2" />
       <p className="mb-1 text-xs text-muted">{t("mfaManual")}</p>
       <p className="mb-5 break-all rounded bg-card px-2 py-1 font-mono text-xs">{secret}</p>
       <MfaSetupForm />

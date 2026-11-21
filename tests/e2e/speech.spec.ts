@@ -43,7 +43,8 @@ test("ses: kapı → kayıt → transkript (maskeli) → öneri → uyuşmazlık
 
   // 2. Temsilci arar, kayıt bildirimini işaretler, "ulaşıldı" ile kapatır
   await firstLogin(page, "e2e-temsilci-s@crmplus.local");
-  await expect(page).toHaveURL(/\/queue/);
+  await expect(page.getByRole("heading", { name: "Benim günüm" })).toBeVisible();
+  await page.goto("/queue");
   await page.getByRole("button", { name: "Ara", exact: true }).click();
   await page.getByRole("button", { name: "Kayıt bildirimi yapıldı" }).click();
   await expect(page.getByRole("button", { name: "Kayıt bildirimi yapıldı ✓" })).toBeVisible();

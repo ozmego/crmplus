@@ -16,9 +16,11 @@
     "sampleData": "Sample data"
   },
   "nav": {
+    "dashboard": "Dashboard",
+    "locations": "Casinos",
     "ops": "Operations",
     "queue": "Call queue",
-    "guests": "Guests",
+    "guests": "Players",
     "imports": "Imports",
     "compare": "Compare",
     "review": "Review",
@@ -59,7 +61,7 @@
     "recoveryHint": "Use these codes if you lose access to your phone. Each works once. Store them safely; they will not be shown again.",
     "recoveryDone": "I saved them, continue",
     "changeTitle": "Set a new password",
-    "changeHint": "You must change your password on first sign-in. At least 12 characters, letters and digits.",
+    "changeHint": "You must change your password on first sign-in. At least {min} characters.",
     "newPassword": "New password",
     "newPassword2": "New password (again)",
     "mismatch": "Passwords do not match.",

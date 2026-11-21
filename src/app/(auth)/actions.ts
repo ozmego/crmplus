@@ -8,6 +8,7 @@ import { hashPassword, passwordPolicyError, verifyPassword } from "@/server/auth
 import { hashRecoveryCode, newRecoveryCodes, verifyTotp } from "@/server/auth/mfa";
 import { clientInfo, createSession, destroySession, markSessionMfaVerified, readSession } from "@/server/auth/session";
 import { burnPasswordCheck } from "@/server/auth/account";
+import { mfaRequired } from "@/server/auth/policy";
 import { decrypt } from "@/server/crypto/field-encryption";
 import { audit } from "@/server/audit";
 import { LOCALE_COOKIE } from "@/i18n/request";
@@ -64,9 +65,11 @@ export async function loginAction(_: FormState, formData: FormData): Promise<For
 
   await db.user.update({ where: { id: user.id }, data: { failedLogins: 0, lockedUntil: null, lastLoginAt: new Date() } });
   await db.loginAttempt.create({ data: { email, ip, success: true } });
-  await createSession(user.id, false);
-  await audit({ actorId: user.id, action: "auth.password_ok", entity: "User", entityId: user.id });
-  redirect(user.mustChangePassword ? "/change-password" : "/mfa");
+  // MFA kapalıysa (AUTH_MFA_REQUIRED) şifre tek adımdır: oturum doğrulanmış açılır
+  const mfa = mfaRequired();
+  await createSession(user.id, !mfa);
+  await audit({ actorId: user.id, action: mfa ? "auth.password_ok" : "auth.login", entity: "User", entityId: user.id, diff: mfa ? undefined : { mfa: "disabled" } });
+  redirect(user.mustChangePassword ? "/change-password" : mfa ? "/mfa" : "/");
 }
 
 export async function changePasswordAction(_: FormState, formData: FormData): Promise<FormState> {
@@ -78,8 +81,8 @@ export async function changePasswordAction(_: FormState, formData: FormData): Pr
   const policy = passwordPolicyError(pw);
   if (policy) return { error: "policy", errorParams: { message: policy } };
   if (await verifyPassword(session.user.passwordHash, pw)) return { error: "samePassword" };
-  // İlk giriş dışında şifre değişimi MFA doğrulaması ister
-  if (!session.user.mustChangePassword && !session.mfaVerified) redirect("/mfa");
+  // İlk giriş dışında şifre değişimi MFA doğrulaması ister (MFA açıksa)
+  if (mfaRequired() && !session.user.mustChangePassword && !session.mfaVerified) redirect("/mfa");
 
   await db.user.update({ where: { id: session.userId }, data: { passwordHash: await hashPassword(pw), mustChangePassword: false } });
   await db.session.updateMany({

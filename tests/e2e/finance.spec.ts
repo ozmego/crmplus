@@ -13,7 +13,8 @@ test("finans: sözleşme → trip → sonuç → hesap → iki kişili onay → 
 
   // Hazırlayan
   await firstLogin(page, "e2e-finans1@crmplus.local");
-  await expect(page).toHaveURL(/\/finance/);
+  await expect(page.getByRole("heading", { name: "Finans", exact: true })).toBeVisible(); // dashboard bölümü
+  await page.goto("/finance");
   await expect(page.getByText("Finansal veri")).toBeVisible();
 
   await page.goto("/finance/contracts");
@@ -100,8 +101,27 @@ test("finans: sözleşme → trip → sonuç → hesap → iki kişili onay → 
   await p2.getByRole("button", { name: "Düzeltmeyi onayla" }).click();
   await expect(p2.getByText("Onaylandı").first()).toBeVisible();
 
-  // Erişim kaydı ve temsilci izolasyonu
+  // Casino profili (finans): trip, oyuncu ve finans bölümü; görüntüleme erişim kaydına yazılır
+  const casino = await db.casino.findUniqueOrThrow({ where: { name: casinoName } });
+  await page.goto("/locations");
+  await page.getByRole("link", { name: new RegExp(casinoName) }).click();
+  await expect(page.getByRole("heading", { name: casinoName })).toBeVisible();
+  await expect(page.getByRole("link", { name: `Kasım grubu ${s}` })).toBeVisible();
+  await expect(page.getByText("3.200.000,00 TRY")).toBeVisible();
+  await expect(page.getByText("2026 ana sözleşme")).toBeVisible();
+
+  // Oyuncu profili: finans rolü yalnız ad + CRM no ve finans sekmesini görür
+  await page.getByRole("link", { name: new RegExp(guest.lastName) }).first().click();
+  await expect(page.getByText(`OYUNCU PROFİLİ · CRM-${String(guest.crmNo).padStart(6, "0")}`)).toBeVisible();
+  await expect(page.getByRole("link", { name: "Genel" })).toHaveCount(0);
+  await expect(page.getByText("bu görüntüleme erişim kaydına yazıldı")).toBeVisible();
+  // (aynı test oyuncusunun önceki koşulardan tripleri olabilir; bu koşunun tripine daraltılır)
+  await expect(page.locator("div.overflow-x-auto", { hasText: `Kasım grubu ${s}` }).getByRole("cell", { name: "3.200.000,00 TRY" })).toBeVisible();
   const f1 = await db.user.findUniqueOrThrow({ where: { email: "e2e-finans1@crmplus.local" } });
+  expect(await db.accessLog.count({ where: { actorId: f1.id, resource: "finance:casino", resourceId: casino.id } })).toBeGreaterThan(0);
+  expect(await db.accessLog.count({ where: { actorId: f1.id, resource: "finance:guest", resourceId: guest.id } })).toBeGreaterThan(0);
+
+  // Erişim kaydı ve temsilci izolasyonu
   expect(await db.accessLog.count({ where: { actorId: f1.id, resource: { startsWith: "finance:" } } })).toBeGreaterThan(3);
   const agent = await browser.newPage();
   await firstLogin(agent, "e2e-temsilci-f@crmplus.local");
@@ -109,4 +129,20 @@ test("finans: sözleşme → trip → sonuç → hesap → iki kişili onay → 
   await expect(agent).toHaveURL(/forbidden/);
   await agent.goto(periodUrl);
   await expect(agent).toHaveURL(/forbidden/);
+  // Temsilci casino profillerine erişemez; oyuncu profilinde finans sekmesi yoktur, ?tab=finans genel sekmeye döner
+  await agent.goto(`/locations/${casino.id}`);
+  await expect(agent).toHaveURL(/forbidden/);
+  // (temsilcinin kapsamına girsin diye oyuncuya açık görev atanır; tripli ve sonuçlu oyuncu)
+  const agentUser = await db.user.findUniqueOrThrow({ where: { email: "e2e-temsilci-f@crmplus.local" } });
+  const t = await db.task.create({ data: { guestId: guest.id, assigneeId: agentUser.id, reason: "E2E profil testi", priority: 1 } });
+  await agent.goto(`/guests/${guest.id}?tab=finans`);
+  await expect(agent.getByRole("heading", { name: "İletişim izinleri" })).toBeVisible();
+  await expect(agent.getByRole("link", { name: "Finans" })).toHaveCount(0);
+  await expect(agent.getByText("bu görüntüleme erişim kaydına yazıldı")).toHaveCount(0);
+  await expect(agent.getByText("3.200.000")).toHaveCount(0);
+  // Trip katılımı görünür, tutar görünmez
+  await agent.getByRole("link", { name: "Tripler" }).click();
+  await expect(agent.getByText(`Kasım grubu ${s}`)).toBeVisible();
+  await expect(agent.getByText("3.200.000")).toHaveCount(0);
+  await db.task.update({ where: { id: t.id }, data: { status: "CANCELLED", closeReason: "E2E" } });
 });

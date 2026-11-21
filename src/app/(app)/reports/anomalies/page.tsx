@@ -23,7 +23,7 @@ export default async function AnomaliesPage({ searchParams }: { searchParams: Pr
         <h1 className="page-title">Operasyon anomalileri · son {d} gün</h1>
         <p className="mt-1 text-sm text-muted">
           Ekip ve gün bazında; çağrıların en az %10’unda ve en az 3 kez görülen durumlar. Bulgular inceleme içindir — personel puanı, sıralama veya yaptırım için kullanılmaz.
-          Finans bulguları her komisyon döneminin sayfasındadır. <Link href="/reports" className="text-teal-ink underline">Raporlar</Link>
+          Finans bulguları her komisyon döneminin sayfasındadır. <Link href="/reports" className="text-teal-ink underline">Rapor merkezi</Link>
         </p>
       </div>
       <form className="flex items-end gap-2 text-sm">

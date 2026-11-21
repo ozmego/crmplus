@@ -17,8 +17,8 @@ export default async function GuestsPage({ searchParams }: { searchParams: Promi
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <p className="eyebrow">MİSAFİR VERİSİ</p>
-        <h1 className="page-title">Misafirler</h1>
+        <p className="eyebrow">OYUNCULAR</p>
+        <h1 className="page-title">Oyuncular</h1>
         <p className="mt-1 text-sm text-muted">{SCOPE_LABEL[scopeOf(user, "guest.view") ?? "own"]} · {total.toLocaleString("tr-TR")} kayıt</p>
       </div>
 
